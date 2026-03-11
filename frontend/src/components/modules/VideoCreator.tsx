@@ -1012,7 +1012,7 @@ export default function VideoCreator({ onTaskCreated, remixData, onRemixClear, p
                                             <Wand2 size={12} /> AI 双语润色
                                         </span>
                                         <button
-                                            onClick={() => setPolishedPrompt(null)}
+                                            onClick={() => { setPolishedPrompt(null); setFeedbackText(""); }}
                                             className="text-[10px] text-gray-400 hover:text-white"
                                         >
                                             ✕
@@ -1076,7 +1076,7 @@ export default function VideoCreator({ onTaskCreated, remixData, onRemixClear, p
                                                 value={feedbackText}
                                                 onChange={(e) => setFeedbackText(e.target.value)}
                                                 onKeyDown={(e) => {
-                                                    if (e.key === "Enter" && feedbackText.trim()) {
+                                                    if (e.key === "Enter" && feedbackText.trim() && !isPolishing) {
                                                         handlePolish(feedbackText.trim());
                                                     }
                                                 }}

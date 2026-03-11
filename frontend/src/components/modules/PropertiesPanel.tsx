@@ -706,6 +706,7 @@ function StoryboardInspector() {
                                         delete newState[selectedFrame.id];
                                         return newState;
                                     });
+                                    setFeedbackText("");
                                 }}
                                 className="text-[10px] text-gray-400 hover:text-white"
                             >
@@ -778,7 +779,7 @@ function StoryboardInspector() {
                                     value={feedbackText}
                                     onChange={(e) => setFeedbackText(e.target.value)}
                                     onKeyDown={(e) => {
-                                        if (e.key === "Enter" && feedbackText.trim()) {
+                                        if (e.key === "Enter" && feedbackText.trim() && !isPolishing) {
                                             handlePolish(feedbackText.trim());
                                         }
                                     }}
