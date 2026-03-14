@@ -424,6 +424,15 @@ async def update_series_prompt_config(series_id: str, config: PromptConfig):
 # Series Model Settings
 # ============================================================
 
+class UpdateModelSettingsRequest(BaseModel):
+    t2i_model: Optional[str] = None
+    i2i_model: Optional[str] = None
+    i2v_model: Optional[str] = None
+    character_aspect_ratio: Optional[str] = None
+    scene_aspect_ratio: Optional[str] = None
+    prop_aspect_ratio: Optional[str] = None
+    storyboard_aspect_ratio: Optional[str] = None
+
 @app.get("/series/{series_id}/model_settings")
 async def get_series_model_settings(series_id: str):
     """Get Series model settings."""
@@ -1400,15 +1409,6 @@ async def toggle_variant_favorite(script_id: str, request: FavoriteVariantReques
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-class UpdateModelSettingsRequest(BaseModel):
-    t2i_model: Optional[str] = None
-    i2i_model: Optional[str] = None
-    i2v_model: Optional[str] = None
-    character_aspect_ratio: Optional[str] = None
-    scene_aspect_ratio: Optional[str] = None
-    prop_aspect_ratio: Optional[str] = None
-    storyboard_aspect_ratio: Optional[str] = None
 
 @app.post("/projects/{script_id}/model_settings", response_model=Script)
 async def update_model_settings(script_id: str, request: UpdateModelSettingsRequest):

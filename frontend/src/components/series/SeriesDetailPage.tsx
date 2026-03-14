@@ -1,10 +1,15 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import dynamic from "next/dynamic";
 import { motion } from "framer-motion";
-import { ArrowLeft, Users, MapPin, Package, Plus, X, Image as ImageIcon } from "lucide-react";
+import { ArrowLeft, Users, MapPin, Package, Plus, X, Image as ImageIcon, Settings, FileText, Download } from "lucide-react";
 import { api } from "@/lib/api";
 import type { Series, Character, Scene, Prop, Project } from "@/store/projectStore";
+
+const SeriesModelSettingsModal = dynamic(() => import("./SeriesModelSettingsModal"), { ssr: false });
+const SeriesPromptConfigModal = dynamic(() => import("./SeriesPromptConfigModal"), { ssr: false });
+const ImportAssetsDialog = dynamic(() => import("./ImportAssetsDialog"), { ssr: false });
 
 interface SeriesDetailPageProps {
   seriesId: string;
@@ -22,6 +27,9 @@ export default function SeriesDetailPage({ seriesId }: SeriesDetailPageProps) {
   const [showAddEpisode, setShowAddEpisode] = useState(false);
   const [newEpisodeTitle, setNewEpisodeTitle] = useState("");
   const [isCreatingEpisode, setIsCreatingEpisode] = useState(false);
+  const [showModelSettings, setShowModelSettings] = useState(false);
+  const [showPromptConfig, setShowPromptConfig] = useState(false);
+  const [showImportAssets, setShowImportAssets] = useState(false);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -92,6 +100,19 @@ export default function SeriesDetailPage({ seriesId }: SeriesDetailPageProps) {
     window.location.hash = `#/series/${seriesId}/episode/${episodeId}`;
   };
 
+  const refreshSeriesData = async () => {
+    try {
+      const [seriesData, episodesData] = await Promise.all([
+        api.getSeries(seriesId),
+        api.getSeriesEpisodes(seriesId),
+      ]);
+      setSeries(seriesData);
+      setEpisodes(episodesData);
+    } catch (error) {
+      console.error("Failed to refresh series data:", error);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen bg-background">
@@ -159,6 +180,31 @@ export default function SeriesDetailPage({ seriesId }: SeriesDetailPageProps) {
           {series.description && (
             <p className="text-sm text-gray-400 mt-1 truncate">{series.description}</p>
           )}
+        </div>
+
+        {/* Action buttons */}
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setShowImportAssets(true)}
+            className="text-gray-400 hover:text-white p-2 rounded-lg hover:bg-white/10 transition-colors"
+            title="导入资产"
+          >
+            <Download size={18} />
+          </button>
+          <button
+            onClick={() => setShowPromptConfig(true)}
+            className="text-gray-400 hover:text-white p-2 rounded-lg hover:bg-white/10 transition-colors"
+            title="提示词配置"
+          >
+            <FileText size={18} />
+          </button>
+          <button
+            onClick={() => setShowModelSettings(true)}
+            className="text-gray-400 hover:text-white p-2 rounded-lg hover:bg-white/10 transition-colors"
+            title="生成设置"
+          >
+            <Settings size={18} />
+          </button>
         </div>
       </div>
 
@@ -294,6 +340,26 @@ export default function SeriesDetailPage({ seriesId }: SeriesDetailPageProps) {
           </div>
         </div>
       </div>
+
+      {/* Modals */}
+      <SeriesModelSettingsModal
+        isOpen={showModelSettings}
+        onClose={() => setShowModelSettings(false)}
+        seriesId={seriesId}
+        onSaved={refreshSeriesData}
+      />
+      <SeriesPromptConfigModal
+        isOpen={showPromptConfig}
+        onClose={() => setShowPromptConfig(false)}
+        seriesId={seriesId}
+        onSaved={refreshSeriesData}
+      />
+      <ImportAssetsDialog
+        isOpen={showImportAssets}
+        onClose={() => setShowImportAssets(false)}
+        seriesId={seriesId}
+        onImported={refreshSeriesData}
+      />
     </main>
   );
 }

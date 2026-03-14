@@ -114,8 +114,6 @@ export default function EnvConfigDialog({ isOpen, onClose, isRequired = false }:
     }));
   };
 
-  const canClose = !isRequired || validateRequiredFields();
-
   if (!isOpen) return null;
 
   return (
@@ -130,14 +128,12 @@ export default function EnvConfigDialog({ isOpen, onClose, isRequired = false }:
               <p className="text-sm text-gray-400">配置阿里云服务的访问凭证</p>
             </div>
           </div>
-          {canClose && (
-            <button
-              onClick={onClose}
-              className="text-gray-400 hover:text-white transition-colors"
-            >
-              <X size={20} />
-            </button>
-          )}
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-white transition-colors"
+          >
+            <X size={20} />
+          </button>
         </div>
 
         {/* Content */}
@@ -360,14 +356,12 @@ export default function EnvConfigDialog({ isOpen, onClose, isRequired = false }:
 
         {/* Footer */}
         <div className="flex items-center justify-end gap-3 p-6 border-t border-gray-800">
-          {canClose && (
-            <button
-              onClick={onClose}
-              className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-white rounded-lg transition-colors"
-            >
-              取消
-            </button>
-          )}
+          <button
+            onClick={onClose}
+            className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-white rounded-lg transition-colors"
+          >
+            返回
+          </button>
           <button
             onClick={handleSave}
             disabled={saving || loading}

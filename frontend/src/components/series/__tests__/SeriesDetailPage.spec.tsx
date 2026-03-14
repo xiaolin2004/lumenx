@@ -21,6 +21,9 @@ vi.mock('lucide-react', () => ({
     Plus: (props: any) => <span data-testid="icon-plus" {...props} />,
     X: (props: any) => <span data-testid="icon-x" {...props} />,
     Image: (props: any) => <span data-testid="icon-image" {...props} />,
+    Settings: (props: any) => <span data-testid="icon-settings" {...props} />,
+    FileText: (props: any) => <span data-testid="icon-file-text" {...props} />,
+    Download: (props: any) => <span data-testid="icon-download" {...props} />,
 }));
 
 // Mock API
