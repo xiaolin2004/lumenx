@@ -96,14 +96,19 @@ static/
 # Internal development tools (not for public repo)
 .agent/
 .claude/
+.superset/
 GITHUB_RELEASE_CHECKLIST.md
 CLAUDE.md
+AGENTS.md
 demand/
+
+# Local docs scratchpads
+docs/api-reference/
+docs/plans/
 
 # Build/packaging configs (keep templates only)
 *.spec
 !build.spec.template
-
 
 
 
