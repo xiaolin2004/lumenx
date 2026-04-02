@@ -32,6 +32,12 @@ class TestProviderRegistryRouting:
         assert registry.resolve_backend("kling-v1", env=env) == "vendor"
         assert registry.resolve_backend("vidu2.0", env=env) == "vendor"
 
+    def test_invalid_provider_mode_falls_back_to_default_backend(self):
+        registry = get_default_provider_registry()
+        env = {"KLING_PROVIDER_MODE": "not-a-valid-backend"}
+
+        assert registry.resolve_backend("kling-v1", env=env) == "dashscope"
+
     def test_future_pixverse_family_can_be_registered_without_resolver_changes(self):
         registry = ProviderRegistry()
         registry.register_family(

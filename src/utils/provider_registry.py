@@ -1,12 +1,12 @@
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Dict, Mapping, Optional, Sequence, Tuple
 
 
 SUPPORTED_PROVIDER_BACKENDS = ("dashscope", "vendor")
 
 
-@dataclass(frozen=True)
+@dataclass
 class ProviderFamilyConfig:
     model_family: str
     backend_default: str = "dashscope"
@@ -30,9 +30,14 @@ class ProviderRegistry:
         family = (config.model_family or "").strip().lower()
         if not family:
             raise ValueError("model_family cannot be empty")
-        if config.backend_default not in SUPPORTED_PROVIDER_BACKENDS:
+        backend_default = (config.backend_default or "").strip().lower()
+        if backend_default not in SUPPORTED_PROVIDER_BACKENDS:
             raise ValueError(f"Unsupported backend_default: {config.backend_default}")
-        self._families[family] = config
+        self._families[family] = replace(
+            config,
+            model_family=family,
+            backend_default=backend_default,
+        )
 
     def get_family_config(self, model_name: str) -> ProviderFamilyConfig:
         normalized = (model_name or "").strip().lower()
@@ -127,4 +132,3 @@ def get_default_provider_registry() -> ProviderRegistry:
 
 def resolve_provider_backend(model_name: str, env: Optional[Mapping[str, str]] = None) -> str:
     return get_default_provider_registry().resolve_backend(model_name=model_name, env=env)
-
