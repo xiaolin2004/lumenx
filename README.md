@@ -156,6 +156,52 @@ npm install && npm run dev
 
 ---
 
+## 🧩 运行模式与必填配置
+
+LumenX 采用 **本地优先（local-first）** 的媒体存储逻辑：
+
+- 所有上传/生成媒体都会先写入 `output/`，作为稳定项目数据源。
+- OSS 是可选镜像与签名 URL 服务，不是必选前置依赖。
+- 提供商路由默认走 DashScope（可按模型家族切换到 vendor-direct）。
+
+### 模式 1：DashScope-only（无 OSS）
+
+- 用途：单机本地创作，不配置 OSS，也不配置原厂 Kling/Vidu Key。
+- 必填：`DASHSCOPE_API_KEY`
+- 可选：`KLING_PROVIDER_MODE`、`VIDU_PROVIDER_MODE`（默认 `dashscope`）
+
+### 模式 2：DashScope + OSS（本地 + 云镜像）
+
+- 用途：本地持久化 + OSS 备份/签名 URL。
+- 必填：
+  - `DASHSCOPE_API_KEY`
+  - `ALIBABA_CLOUD_ACCESS_KEY_ID`
+  - `ALIBABA_CLOUD_ACCESS_KEY_SECRET`
+  - `OSS_BUCKET_NAME`
+  - `OSS_ENDPOINT`
+- 可选：`OSS_BASE_PATH`
+
+### 模式 3：DashScope-first + Kling vendor-direct
+
+- 用途：大部分模型走 DashScope，仅 Kling 走原厂。
+- 必填：
+  - `DASHSCOPE_API_KEY`
+  - `KLING_PROVIDER_MODE=vendor`
+  - `KLING_ACCESS_KEY`
+  - `KLING_SECRET_KEY`
+- 备注：是否配置 OSS 取决于你的存储需求，不影响该模式可用性。
+
+### 模式 4：DashScope-first + Vidu vendor-direct
+
+- 用途：大部分模型走 DashScope，仅 Vidu 走原厂。
+- 必填：
+  - `DASHSCOPE_API_KEY`
+  - `VIDU_PROVIDER_MODE=vendor`
+  - `VIDU_API_KEY`
+- 备注：是否配置 OSS 取决于你的存储需求，不影响该模式可用性。
+
+---
+
 ## ⚙️ 进阶配置
 
 <details>
@@ -222,4 +268,3 @@ lumenx/
 <div align="center">
   Made with ❤️ by Alibaba Group
 </div>
-
