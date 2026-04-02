@@ -1,5 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Tuple
+import base64
+import mimetypes
 import os
 import time
 import requests
@@ -200,8 +202,8 @@ class WanxImageModel(ImageGenModel):
             "X-DashScope-Async": "enable"  # Required for async mode
         }
         
-        # Build content array with text and reference images
-        content = [{"text": prompt}]
+        # Build content array with reference images and prompt text
+        content = []
         
         # Add reference images (upload to OSS first if local paths)
         if ref_image_paths:
@@ -209,36 +211,17 @@ class WanxImageModel(ImageGenModel):
             # This method is specifically for wan2.6-image which supports 4 images
             ref_limit = 4
             for path in ref_image_paths[:ref_limit]:
-                if os.path.exists(path):
-                    # Upload local file to OSS and get signed URL for AI API
-                    uploader = OSSImageUploader()
-                    if uploader.is_configured:
-                        object_key = uploader.upload_file(path, sub_path="temp/ref_images")
-                        if object_key:
-                            # Generate signed URL for AI API access (30 min validity)
-                            signed_url = uploader.sign_url_for_api(object_key)
-                            content.append({"image": signed_url})
-                            logger.info(f"Reference image uploaded, signed URL: {signed_url[:80]}...")
-                    else:
-                        # OSS not configured, try to use local path (will likely fail for remote APIs)
-                        logger.warning(f"OSS not configured, cannot upload reference image: {path}")
-                elif path.startswith("http"):
-                    # Already a URL (could be signed or public)
-                    content.append({"image": path})
-                else:
-                    # Check if it's an OSS Object Key using the utility function
-                    from ..utils.oss_utils import is_object_key
-                    if is_object_key(path):
-                        uploader = OSSImageUploader()
-                        if uploader.is_configured:
-                            # Generate signed URL for AI API access (30 min validity)
-                            signed_url = uploader.sign_url_for_api(path)
-                            content.append({"image": signed_url})
-                            logger.info(f"Reference image (Object Key), signed URL: {signed_url[:80]}...")
-                        else:
-                            logger.warning(f"OSS not configured but Object Key provided: {path}")
-                    else:
-                        logger.warning(f"Reference image not found: {path}")
+                image_input = self._resolve_wan26_reference_image(path)
+                if image_input:
+                    content.append({"image": image_input})
+
+        if ref_image_paths and not content:
+            raise RuntimeError(
+                "Wan 2.6 Image requires at least one usable reference image. "
+                "Please provide a valid local image, public URL, or configure OSS."
+            )
+
+        content.append({"text": prompt})
         
         payload = {
             "model": "wan2.6-image",
@@ -349,6 +332,48 @@ class WanxImageModel(ImageGenModel):
             # PENDING or RUNNING - continue polling
         
         raise RuntimeError(f"Wan 2.6 Image task timed out after {max_wait_time}s")
+
+    def _resolve_wan26_reference_image(self, path: str) -> str:
+        if os.path.exists(path):
+            uploader = OSSImageUploader()
+            if uploader.is_configured:
+                object_key = uploader.upload_file(path, sub_path="temp/ref_images")
+                if object_key:
+                    signed_url = uploader.sign_url_for_api(object_key)
+                    logger.info(f"Reference image uploaded, signed URL: {signed_url[:80]}...")
+                    return signed_url
+
+            data_uri = self._encode_local_image_as_data_uri(path)
+            logger.info("OSS not configured, using base64 data URI for local reference image")
+            return data_uri
+
+        if path.startswith("http"):
+            return path
+
+        from ..utils.oss_utils import is_object_key
+
+        if is_object_key(path):
+            uploader = OSSImageUploader()
+            if uploader.is_configured:
+                signed_url = uploader.sign_url_for_api(path)
+                logger.info(f"Reference image (Object Key), signed URL: {signed_url[:80]}...")
+                return signed_url
+
+            logger.warning(f"OSS not configured but Object Key provided: {path}")
+            return None
+
+        logger.warning(f"Reference image not found: {path}")
+        return None
+
+    def _encode_local_image_as_data_uri(self, path: str) -> str:
+        mime_type, _ = mimetypes.guess_type(path)
+        if not mime_type:
+            mime_type = "image/png"
+
+        with open(path, "rb") as image_file:
+            encoded = base64.b64encode(image_file.read()).decode("ascii")
+
+        return f"data:{mime_type};base64,{encoded}"
 
     def _generate_sdk(self, prompt: str, model_name: str, size: str, n: int, negative_prompt: str, all_ref_paths: list, kwargs: dict) -> str:
         """Generate image using Dashscope SDK (for older models)."""
