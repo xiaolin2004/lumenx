@@ -226,6 +226,10 @@ export const I2V_MODELS: I2VModelConfig[] = [
       duration: { type: 'slider', min: 1, max: 16, step: 1, default: 5 }, params: VIDU_PARAMS },
     { id: 'viduq3-turbo', name: 'Vidu Q3 Turbo', description: 'Vidu fast generation',
       duration: { type: 'slider', min: 1, max: 16, step: 1, default: 5 }, params: VIDU_PARAMS },
+    { id: 'Doubao-Seedance-1.0-Pro-Fast', name: 'Seedance Pro Fast', description: 'ByteDance Seedance Pro Fast (via aiping)',
+      duration: { type: 'buttons', options: [5, 10], default: 5 }, params: { resolution: { options: ['480p', '720p', '1080p'], default: '720p' } } },
+    { id: 'Doubao-Seedance-1.0-Lite', name: 'Seedance Lite', description: 'ByteDance Seedance Lite (via aiping)',
+      duration: { type: 'buttons', options: [5, 10], default: 5 }, params: { resolution: { options: ['480p', '720p'], default: '720p' } } },
 ];
 
 export const ASPECT_RATIOS = [
