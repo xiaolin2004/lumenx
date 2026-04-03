@@ -13,3 +13,9 @@ __pycache__
 demand/
 .agent/
 .claude/
+.venv
+dist/
+dist_mac/
+dist_windows/
+build/
+bin/
