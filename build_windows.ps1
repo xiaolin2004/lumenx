@@ -22,7 +22,7 @@ if (Get-Command yarn -ErrorAction SilentlyContinue) {
     yarn build
 } elseif (Get-Command npm -ErrorAction SilentlyContinue) {
     Write-Host "   Using npm to install dependencies..."
-    npm install
+    npm install --no-package-lock
     Write-Host "   Using npm to build frontend..."
     npm run build
 } else {
@@ -111,7 +111,7 @@ $pyinstallerArgs = @(
     "--clean",
     "--noconfirm",
     "--onefile",
-    "--name", "TronComic",
+    "--name", "LumenX Studio",
     "--windowed",
     "--add-data", "static;static",
     "--add-data", "src;src",
@@ -161,7 +161,7 @@ if ($iconParam) {
         "--clean",
         "--noconfirm",
         "--onefile",
-        "--name", "TronComic",
+        "--name", "LumenX Studio",
         "--windowed",
         $iconParam,
         "--add-data", "static;static",

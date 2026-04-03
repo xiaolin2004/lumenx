@@ -25,7 +25,7 @@ if command -v yarn &> /dev/null; then
     yarn build
 elif command -v npm &> /dev/null; then
     echo "   使用 npm 安装依赖..."
-    npm install
+    npm install --no-package-lock
     echo "   使用 npm 构建前端..."
     npm run build
 else
