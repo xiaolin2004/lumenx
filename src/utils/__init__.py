@@ -21,20 +21,36 @@ def setup_logging(level=logging.INFO, log_file=None):
     
     # If no log file specified, use default in user directory
     if log_file is None:
-        log_file = os.path.join(get_log_dir(), "app.log")
+        try:
+            log_file = os.path.join(get_log_dir(), "app.log")
+        except OSError as exc:
+            print(
+                f"WARNING: Log directory unavailable in user home: {exc}. "
+                "Falling back to console logging.",
+                file=sys.stderr,
+            )
+            log_file = None
     
     # 如果指定了日志文件，添加文件处理器
     if log_file:
-        # 确保日志目录存在
-        log_dir = os.path.dirname(log_file)
-        if log_dir:
-            os.makedirs(log_dir, exist_ok=True)
-        
-        file_handler = logging.FileHandler(log_file, mode='a', encoding='utf-8')
-        file_handler.setFormatter(
-            logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        )
-        handlers.append(file_handler)
+        try:
+            # 确保日志目录存在
+            log_dir = os.path.dirname(log_file)
+            if log_dir:
+                os.makedirs(log_dir, exist_ok=True)
+
+            file_handler = logging.FileHandler(log_file, mode='a', encoding='utf-8')
+            file_handler.setFormatter(
+                logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            )
+            handlers.append(file_handler)
+        except OSError as exc:
+            # In restricted environments (tests/sandbox), fallback to console-only logging.
+            print(
+                f"WARNING: File logging unavailable at '{log_file}': {exc}. "
+                "Falling back to console logging.",
+                file=sys.stderr,
+            )
     
     # 添加控制台处理器（会被重定向到日志文件）
     console_handler = logging.StreamHandler(sys.stdout)

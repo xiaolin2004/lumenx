@@ -22,12 +22,7 @@ export default function EnvConfigChecker() {
       const config = await api.getEnvConfig();
       // 空值和空字符串都视为未配置
       const dashscopeKey = config.DASHSCOPE_API_KEY?.trim();
-      const accessKeyId = config.ALIBABA_CLOUD_ACCESS_KEY_ID?.trim();
-      const accessKeySecret = config.ALIBABA_CLOUD_ACCESS_KEY_SECRET?.trim();
-      
-      const hasRequired = dashscopeKey && dashscopeKey.length > 0 &&
-                         accessKeyId && accessKeyId.length > 0 &&
-                         accessKeySecret && accessKeySecret.length > 0;
+      const hasRequired = dashscopeKey && dashscopeKey.length > 0;
       
       if (!hasRequired) {
         setEnvRequired(true);

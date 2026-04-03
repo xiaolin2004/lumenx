@@ -156,6 +156,52 @@ npm install && npm run dev
 
 ---
 
+## 🧩 Operating Modes & Required Variables
+
+LumenX uses a **local-first** media storage strategy:
+
+- Uploaded/generated media is always written to `output/` first as the durable project source.
+- OSS is optional (mirror + signed URL service), not a required prerequisite.
+- Provider routing defaults to DashScope and can be overridden per model family.
+
+### Mode 1: DashScope-only (No OSS)
+
+- Use case: local-only creation without OSS and without vendor-direct Kling/Vidu keys.
+- Required: `DASHSCOPE_API_KEY`
+- Optional: `KLING_PROVIDER_MODE`, `VIDU_PROVIDER_MODE` (default is `dashscope`)
+
+### Mode 2: DashScope + OSS (Local + Cloud Mirror)
+
+- Use case: local persistence with OSS backup/signing capability.
+- Required:
+  - `DASHSCOPE_API_KEY`
+  - `ALIBABA_CLOUD_ACCESS_KEY_ID`
+  - `ALIBABA_CLOUD_ACCESS_KEY_SECRET`
+  - `OSS_BUCKET_NAME`
+  - `OSS_ENDPOINT`
+- Optional: `OSS_BASE_PATH`
+
+### Mode 3: DashScope-first + Kling Vendor-direct
+
+- Use case: most models run through DashScope, while Kling runs against vendor API.
+- Required:
+  - `DASHSCOPE_API_KEY`
+  - `KLING_PROVIDER_MODE=vendor`
+  - `KLING_ACCESS_KEY`
+  - `KLING_SECRET_KEY`
+- Note: OSS remains optional and independent from this routing mode.
+
+### Mode 4: DashScope-first + Vidu Vendor-direct
+
+- Use case: most models run through DashScope, while Vidu runs against vendor API.
+- Required:
+  - `DASHSCOPE_API_KEY`
+  - `VIDU_PROVIDER_MODE=vendor`
+  - `VIDU_API_KEY`
+- Note: OSS remains optional and independent from this routing mode.
+
+---
+
 ## ⚙️ Advanced Configuration
 
 <details>

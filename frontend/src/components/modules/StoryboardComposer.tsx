@@ -282,20 +282,9 @@ export default function StoryboardComposer() {
                 });
             }
 
-            // Construct Enhanced Prompt using Art Direction (or fallback to legacy)
+            // Construct enhanced prompt using Art Direction style config.
             const artDirection = currentProject?.art_direction;
-            let globalStylePrompt = "";
-
-            if (artDirection?.style_config) {
-                // Use Art Direction style
-                globalStylePrompt = artDirection.style_config.positive_prompt;
-            } else {
-                // Fallback to legacy style system
-                const styles = useProjectStore.getState().styles;
-                const selectedStyleId = useProjectStore.getState().selectedStyleId;
-                const currentStyle = styles.find(s => s.id === selectedStyleId);
-                globalStylePrompt = currentStyle?.prompt || "";
-            }
+            const globalStylePrompt = artDirection?.style_config?.positive_prompt || "";
 
             // Construct final prompt:
             // If image_prompt exists (polished or manually edited), it already contains action/dialogue,

@@ -2,29 +2,79 @@
 
 import { useState, useEffect } from "react";
 import { Save, Loader2, Key, ChevronDown, ChevronRight, Settings, MessageSquareCode } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, type EnvConfigPayload, type ProviderMode } from "@/lib/api";
 import { T2I_MODELS, I2I_MODELS, I2V_MODELS, ASPECT_RATIOS } from "@/store/projectStore";
 import { Image, Video, Layout, Check, User, Building, Box } from "lucide-react";
 
-interface EnvConfig {
+type EnvConfig = EnvConfigPayload & {
   DASHSCOPE_API_KEY: string;
   ALIBABA_CLOUD_ACCESS_KEY_ID: string;
   ALIBABA_CLOUD_ACCESS_KEY_SECRET: string;
   OSS_BUCKET_NAME: string;
   OSS_ENDPOINT: string;
   OSS_BASE_PATH: string;
+  KLING_PROVIDER_MODE: ProviderMode;
+  VIDU_PROVIDER_MODE: ProviderMode;
+  PIXVERSE_PROVIDER_MODE: ProviderMode;
   KLING_ACCESS_KEY: string;
   KLING_SECRET_KEY: string;
   VIDU_API_KEY: string;
   endpoint_overrides: Record<string, string>;
-  [key: string]: string | Record<string, string>;
-}
+};
 
 const ENDPOINT_PROVIDERS = [
   { key: "DASHSCOPE_BASE_URL", label: "DashScope", placeholder: "https://dashscope.aliyuncs.com" },
   { key: "KLING_BASE_URL", label: "Kling", placeholder: "https://api-beijing.klingai.com/v1" },
   { key: "VIDU_BASE_URL", label: "Vidu", placeholder: "https://api.vidu.cn/ent/v2" },
 ];
+
+const DEFAULT_CONFIG: EnvConfig = {
+  DASHSCOPE_API_KEY: "",
+  ALIBABA_CLOUD_ACCESS_KEY_ID: "",
+  ALIBABA_CLOUD_ACCESS_KEY_SECRET: "",
+  OSS_BUCKET_NAME: "",
+  OSS_ENDPOINT: "",
+  OSS_BASE_PATH: "",
+  KLING_PROVIDER_MODE: "dashscope",
+  VIDU_PROVIDER_MODE: "dashscope",
+  PIXVERSE_PROVIDER_MODE: "dashscope",
+  KLING_ACCESS_KEY: "",
+  KLING_SECRET_KEY: "",
+  VIDU_API_KEY: "",
+  endpoint_overrides: {},
+};
+
+const normalizeProviderMode = (mode?: string): ProviderMode => (mode === "vendor" ? "vendor" : "dashscope");
+
+const normalizeEnvConfig = (existing: EnvConfig, data?: EnvConfigPayload): EnvConfig => ({
+  ...existing,
+  ...data,
+  KLING_PROVIDER_MODE: normalizeProviderMode(data?.KLING_PROVIDER_MODE ?? existing.KLING_PROVIDER_MODE),
+  VIDU_PROVIDER_MODE: normalizeProviderMode(data?.VIDU_PROVIDER_MODE ?? existing.VIDU_PROVIDER_MODE),
+  PIXVERSE_PROVIDER_MODE: normalizeProviderMode(data?.PIXVERSE_PROVIDER_MODE ?? existing.PIXVERSE_PROVIDER_MODE),
+  endpoint_overrides: data?.endpoint_overrides ?? existing.endpoint_overrides ?? {},
+});
+
+const getValidationErrors = (env: EnvConfig): string[] => {
+  const errors: string[] = [];
+
+  if (!env.DASHSCOPE_API_KEY?.trim()) {
+    errors.push("DashScope API Key");
+  }
+  if (env.KLING_PROVIDER_MODE === "vendor") {
+    if (!env.KLING_ACCESS_KEY?.trim()) {
+      errors.push("Kling Access Key (vendor mode)");
+    }
+    if (!env.KLING_SECRET_KEY?.trim()) {
+      errors.push("Kling Secret Key (vendor mode)");
+    }
+  }
+  if (env.VIDU_PROVIDER_MODE === "vendor" && !env.VIDU_API_KEY?.trim()) {
+    errors.push("Vidu API Key (vendor mode)");
+  }
+
+  return errors;
+};
 
 const LS_KEY_MODEL = "lumenx_default_model_settings";
 const LS_KEY_PROMPT = "lumenx_default_prompt_config";
@@ -57,18 +107,7 @@ function loadFromLS<T>(key: string, fallback: T): T {
 
 export default function SettingsPage() {
   // ── API Config ──
-  const [config, setConfig] = useState<EnvConfig>({
-    DASHSCOPE_API_KEY: "",
-    ALIBABA_CLOUD_ACCESS_KEY_ID: "",
-    ALIBABA_CLOUD_ACCESS_KEY_SECRET: "",
-    OSS_BUCKET_NAME: "",
-    OSS_ENDPOINT: "",
-    OSS_BASE_PATH: "",
-    KLING_ACCESS_KEY: "",
-    KLING_SECRET_KEY: "",
-    VIDU_API_KEY: "",
-    endpoint_overrides: {},
-  });
+  const [config, setConfig] = useState<EnvConfig>(DEFAULT_CONFIG);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -101,7 +140,7 @@ export default function SettingsPage() {
     setLoadError(null);
     try {
       const data = await api.getEnvConfig();
-      setConfig((prev) => ({ ...prev, ...data, endpoint_overrides: data.endpoint_overrides ?? {} }));
+      setConfig((prev) => normalizeEnvConfig(prev, data));
     } catch {
       setLoadError("Failed to load configuration. Is the backend running?");
     } finally {
@@ -110,6 +149,12 @@ export default function SettingsPage() {
   };
 
   const handleSaveApiConfig = async () => {
+    const errors = getValidationErrors(config);
+    if (errors.length > 0) {
+      alert(`Please fill in required fields:\n- ${errors.join("\n- ")}`);
+      return;
+    }
+
     setSaving(true);
     try {
       await api.saveEnvConfig(config);
@@ -144,6 +189,8 @@ export default function SettingsPage() {
 
   const inputClass =
     "w-full bg-black/30 border border-white/10 rounded-lg px-4 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-primary/50 transition-colors";
+  const modeButtonClass = (active: boolean) =>
+    `px-3 py-1.5 text-xs rounded-md border transition-colors ${active ? "border-amber-500/60 bg-amber-500/15 text-amber-200" : "border-white/10 bg-white/5 text-gray-400 hover:text-gray-200"}`;
 
   return (
     <div className="container mx-auto px-6 py-8 max-w-4xl space-y-8">
@@ -157,7 +204,7 @@ export default function SettingsPage() {
           </div>
           <div>
             <h2 className="text-lg font-bold text-white">API 配置</h2>
-            <p className="text-xs text-gray-500">Configure API keys and cloud service credentials</p>
+            <p className="text-xs text-gray-500">DashScope-first setup with optional OSS mirror and provider-direct routing</p>
           </div>
         </div>
 
@@ -177,35 +224,36 @@ export default function SettingsPage() {
                 <span>DashScope API Key <span className="text-red-500">*</span></span>
                 <span className="text-gray-600 font-normal text-xs">e.g. sk-xxx</span>
               </label>
-              <input type="password" value={config.DASHSCOPE_API_KEY} onChange={(e) => handleChange("DASHSCOPE_API_KEY", e.target.value)} placeholder="For Qwen and other DashScope models" className={inputClass} />
+              <input type="password" value={config.DASHSCOPE_API_KEY} onChange={(e) => handleChange("DASHSCOPE_API_KEY", e.target.value)} placeholder="Required for DashScope-first model routing" className={inputClass} />
             </div>
 
             <div className="bg-white/5 border border-white/10 rounded-lg p-4 space-y-4">
-              <p className="text-xs text-gray-400">For OSS storage service</p>
+              <p className="text-xs text-gray-400">Storage is local-first by default. These credentials are only needed when enabling OSS mirror.</p>
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">Alibaba Cloud Access Key ID <span className="text-red-500">*</span></label>
-                <input type="password" value={config.ALIBABA_CLOUD_ACCESS_KEY_ID} onChange={(e) => handleChange("ALIBABA_CLOUD_ACCESS_KEY_ID", e.target.value)} placeholder="LTAI5t..." className={inputClass} />
+                <label className="block text-sm font-medium text-gray-300 mb-2">Alibaba Cloud Access Key ID</label>
+                <input type="password" value={config.ALIBABA_CLOUD_ACCESS_KEY_ID} onChange={(e) => handleChange("ALIBABA_CLOUD_ACCESS_KEY_ID", e.target.value)} placeholder="Optional, for OSS mirror" className={inputClass} />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">Alibaba Cloud Access Key Secret <span className="text-red-500">*</span></label>
-                <input type="password" value={config.ALIBABA_CLOUD_ACCESS_KEY_SECRET} onChange={(e) => handleChange("ALIBABA_CLOUD_ACCESS_KEY_SECRET", e.target.value)} placeholder="Access key secret" className={inputClass} />
+                <label className="block text-sm font-medium text-gray-300 mb-2">Alibaba Cloud Access Key Secret</label>
+                <input type="password" value={config.ALIBABA_CLOUD_ACCESS_KEY_SECRET} onChange={(e) => handleChange("ALIBABA_CLOUD_ACCESS_KEY_SECRET", e.target.value)} placeholder="Optional, for OSS mirror" className={inputClass} />
               </div>
             </div>
 
             <div className="pt-4 border-t border-white/10">
-              <h3 className="text-sm font-bold text-white mb-4">OSS Configuration</h3>
+              <h3 className="text-sm font-bold text-white mb-2">OSS Mirror (Optional)</h3>
+              <p className="text-[10px] text-gray-500 mb-4">Generated assets always save locally first. Configure OSS to keep an optional cloud mirror.</p>
               <div className="space-y-4">
                 <div>
                   <label className="flex items-center justify-between text-sm font-medium text-gray-300 mb-2">
-                    <span>OSS Bucket Name <span className="text-red-500">*</span></span>
+                    <span>OSS Bucket Name</span>
                   </label>
-                  <input type="text" value={config.OSS_BUCKET_NAME} onChange={(e) => handleChange("OSS_BUCKET_NAME", e.target.value)} placeholder="your_bucket_name" className={inputClass} />
+                  <input type="text" value={config.OSS_BUCKET_NAME} onChange={(e) => handleChange("OSS_BUCKET_NAME", e.target.value)} placeholder="your_bucket_name (optional)" className={inputClass} />
                 </div>
                 <div>
                   <label className="flex items-center justify-between text-sm font-medium text-gray-300 mb-2">
-                    <span>OSS Endpoint <span className="text-red-500">*</span></span>
+                    <span>OSS Endpoint</span>
                   </label>
-                  <input type="text" value={config.OSS_ENDPOINT} onChange={(e) => handleChange("OSS_ENDPOINT", e.target.value)} placeholder="oss-cn-beijing.aliyuncs.com" className={inputClass} />
+                  <input type="text" value={config.OSS_ENDPOINT} onChange={(e) => handleChange("OSS_ENDPOINT", e.target.value)} placeholder="oss-cn-beijing.aliyuncs.com (optional)" className={inputClass} />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-300 mb-2">OSS Base Path</label>
@@ -215,24 +263,54 @@ export default function SettingsPage() {
             </div>
 
             <div className="pt-4 border-t border-white/10">
-              <h3 className="text-sm font-bold text-white mb-4">Kling AI</h3>
+              <h3 className="text-sm font-bold text-white mb-4">Kling Provider</h3>
               <div className="bg-white/5 border border-white/10 rounded-lg p-4 space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-2">Kling Access Key</label>
-                  <input type="password" value={config.KLING_ACCESS_KEY} onChange={(e) => handleChange("KLING_ACCESS_KEY", e.target.value)} placeholder="Kling API Access Key" className={inputClass} />
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" onClick={() => handleChange("KLING_PROVIDER_MODE", "dashscope")} className={modeButtonClass(config.KLING_PROVIDER_MODE === "dashscope")}>
+                    DashScope
+                  </button>
+                  <button type="button" onClick={() => handleChange("KLING_PROVIDER_MODE", "vendor")} className={modeButtonClass(config.KLING_PROVIDER_MODE === "vendor")}>
+                    Vendor Direct
+                  </button>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-2">Kling Secret Key</label>
-                  <input type="password" value={config.KLING_SECRET_KEY} onChange={(e) => handleChange("KLING_SECRET_KEY", e.target.value)} placeholder="Kling API Secret Key" className={inputClass} />
-                </div>
+                <p className="text-xs text-gray-500">
+                  DashScope mode uses your DashScope API key. Vendor-direct mode requires Kling Access Key and Secret Key.
+                </p>
+                {config.KLING_PROVIDER_MODE === "vendor" && (
+                  <>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-300 mb-2">Kling Access Key <span className="text-red-500">*</span></label>
+                      <input type="password" value={config.KLING_ACCESS_KEY} onChange={(e) => handleChange("KLING_ACCESS_KEY", e.target.value)} placeholder="Kling API Access Key" className={inputClass} />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-300 mb-2">Kling Secret Key <span className="text-red-500">*</span></label>
+                      <input type="password" value={config.KLING_SECRET_KEY} onChange={(e) => handleChange("KLING_SECRET_KEY", e.target.value)} placeholder="Kling API Secret Key" className={inputClass} />
+                    </div>
+                  </>
+                )}
               </div>
             </div>
 
             <div className="pt-4 border-t border-white/10">
-              <h3 className="text-sm font-bold text-white mb-4">Vidu AI</h3>
-              <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">Vidu API Key</label>
-                <input type="password" value={config.VIDU_API_KEY} onChange={(e) => handleChange("VIDU_API_KEY", e.target.value)} placeholder="Vidu API Key" className={inputClass} />
+              <h3 className="text-sm font-bold text-white mb-4">Vidu Provider</h3>
+              <div className="bg-white/5 border border-white/10 rounded-lg p-4 space-y-4">
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" onClick={() => handleChange("VIDU_PROVIDER_MODE", "dashscope")} className={modeButtonClass(config.VIDU_PROVIDER_MODE === "dashscope")}>
+                    DashScope
+                  </button>
+                  <button type="button" onClick={() => handleChange("VIDU_PROVIDER_MODE", "vendor")} className={modeButtonClass(config.VIDU_PROVIDER_MODE === "vendor")}>
+                    Vendor Direct
+                  </button>
+                </div>
+                <p className="text-xs text-gray-500">
+                  DashScope mode uses your DashScope API key. Vendor-direct mode requires a Vidu API key.
+                </p>
+                {config.VIDU_PROVIDER_MODE === "vendor" && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-300 mb-2">Vidu API Key <span className="text-red-500">*</span></label>
+                    <input type="password" value={config.VIDU_API_KEY} onChange={(e) => handleChange("VIDU_API_KEY", e.target.value)} placeholder="Vidu API Key" className={inputClass} />
+                  </div>
+                )}
               </div>
             </div>
 
@@ -243,7 +321,7 @@ export default function SettingsPage() {
               </button>
               {endpointsOpen && (
                 <div className="mt-4 space-y-4">
-                  <p className="text-xs text-gray-500">Custom API endpoint URLs. Leave empty to use defaults.</p>
+                  <p className="text-xs text-gray-500">Custom API endpoint URLs. Leave empty to use defaults. Overrides are preserved regardless of provider mode.</p>
                   {ENDPOINT_PROVIDERS.map(({ key, label, placeholder }) => (
                     <div key={key}>
                       <label className="flex items-center justify-between text-sm font-medium text-gray-300 mb-2">

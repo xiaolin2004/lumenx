@@ -460,7 +460,7 @@ export default function ConsistencyVault() {
                             generatingTypes={getAssetGeneratingTypes(selectedAssetId)}
                             stylePrompt={currentProject?.art_direction?.style_config?.positive_prompt || ""}
                             styleNegativePrompt={currentProject?.art_direction?.style_config?.negative_prompt || ""}
-                            onGenerateVideo={(prompt: string, duration: number, subType: string) => handleGenerateVideo(selectedAssetId, selectedAssetType, prompt, duration, subType)}
+                            onGenerateVideo={(prompt: string, duration: number, subType?: string) => handleGenerateVideo(selectedAssetId, selectedAssetType, prompt, duration, subType || "video")}
                             onDeleteVideo={(videoId: string) => handleDeleteVideo(selectedAssetId, selectedAssetType, videoId)}
                         />
                     ) : (

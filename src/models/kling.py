@@ -5,10 +5,8 @@ Auth: JWT (HS256) using KLING_ACCESS_KEY + KLING_SECRET_KEY
 Models: kling-v2-6 (default), kling-v2-5-turbo
 """
 
-import base64
 import logging
 import os
-import re
 import time
 from typing import Dict, Any, Tuple
 
@@ -17,6 +15,8 @@ import requests
 
 from .base import VideoGenModel
 from ..utils.endpoints import get_provider_base_url
+from ..utils.oss_utils import OSSImageUploader
+from ..utils.provider_media import resolve_media_input
 
 logger = logging.getLogger(__name__)
 
@@ -53,27 +53,35 @@ class KlingModel(VideoGenModel):
             "Content-Type": "application/json",
         }
 
-    @staticmethod
-    def _resolve_image(image_path: str) -> str:
-        """Return a URL string or base64 data for a local file."""
-        if image_path.startswith(("http://", "https://", "data:")):
-            return image_path
-        if not os.path.isfile(image_path):
-            raise FileNotFoundError(f"Image file not found: {image_path}")
-        with open(image_path, "rb") as f:
-            data = base64.b64encode(f.read()).decode()
-        ext = os.path.splitext(image_path)[1].lower().lstrip(".")
-        mime_map = {"jpg": "jpeg", "jpeg": "jpeg", "png": "png", "webp": "webp"}
-        mime_sub = mime_map.get(ext, "png")
-        return f"data:image/{mime_sub};base64,{data}"
+    def _resolve_vendor_image_input(
+        self,
+        *,
+        img_url: str = None,
+        img_path: str = None,
+        model_name: str = None,
+    ) -> str:
+        """
+        Resolve Kling vendor image input via the shared provider-media layer.
 
-    @staticmethod
-    def _strip_data_prefix(value: str) -> str:
-        """Strip 'data:xxx;base64,' prefix. Kling expects pure base64."""
-        match = re.match(r"^data:[^;]+;base64,(.+)$", value, re.DOTALL)
-        if match:
-            return match.group(1)
-        return value
+        Prefer the local file when available so pipeline-downloaded or output-relative
+        refs become valid base64 payloads. If only a remote URL is available, keep the
+        legacy pass-through behavior for direct adapter calls.
+        """
+        image_ref = img_path or img_url
+        if not image_ref:
+            raise ValueError("Kling image input requires img_path or img_url")
+
+        if not img_path and isinstance(img_url, str) and img_url.startswith(("http://", "https://")):
+            return img_url
+
+        resolved = resolve_media_input(
+            image_ref,
+            model_name=model_name or self.model_name,
+            modality="image",
+            backend="vendor",
+            uploader=OSSImageUploader(),
+        )
+        return resolved.value
 
     def generate(self, prompt: str, output_path: str, img_url: str = None,
                  img_path: str = None, **kwargs) -> Tuple[str, float]:
@@ -104,9 +112,11 @@ class KlingModel(VideoGenModel):
             }
 
             # Resolve image
-            image_source = img_url or img_path
-            image_value = self._resolve_image(image_source)
-            body["image"] = self._strip_data_prefix(image_value)
+            body["image"] = self._resolve_vendor_image_input(
+                img_url=img_url,
+                img_path=img_path,
+                model_name=model_name,
+            )
 
             submit_url = f"{base_url}/videos/image2video"
             poll_base = f"{base_url}/videos/image2video"

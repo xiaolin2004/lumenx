@@ -85,11 +85,26 @@ export default function ArtDirection() {
         }
     };
 
-    const handleSelectStyle = (style: StyleConfig) => {
-        setSelectedStyle(style);
-        setEditingName(style.name);
-        setEditingPositive(style.positive_prompt);
-        setEditingNegative(style.negative_prompt);
+    const toStyleConfig = (style: StyleConfig | StylePreset): StyleConfig => {
+        if ("positive_prompt" in style) {
+            return style;
+        }
+
+        return {
+            id: style.id,
+            name: style.name,
+            positive_prompt: style.prompt,
+            negative_prompt: style.negative_prompt || "",
+            is_custom: false,
+        };
+    };
+
+    const handleSelectStyle = (style: StyleConfig | StylePreset) => {
+        const normalizedStyle = toStyleConfig(style);
+        setSelectedStyle(normalizedStyle);
+        setEditingName(normalizedStyle.name);
+        setEditingPositive(normalizedStyle.positive_prompt);
+        setEditingNegative(normalizedStyle.negative_prompt);
     };
 
     const handleSaveCustom = async () => {

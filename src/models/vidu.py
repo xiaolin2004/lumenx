@@ -14,6 +14,8 @@ import requests
 
 from .base import VideoGenModel
 from ..utils.endpoints import get_provider_base_url
+from ..utils.oss_utils import OSSImageUploader
+from ..utils.provider_media import resolve_media_input
 
 logger = logging.getLogger(__name__)
 DEFAULT_T2V_MODEL = "viduq3-pro"
@@ -44,6 +46,37 @@ class ViduModel(VideoGenModel):
         }
         return mapping.get(raw_state.lower(), "pending")
 
+    def _resolve_vendor_image_input(
+        self,
+        *,
+        img_url: str = None,
+        img_path: str = None,
+        model_name: str = None,
+    ) -> str:
+        """
+        Resolve Vidu vendor image input via the shared provider-media layer.
+
+        Prefer an existing remote URL when available. For local files, require an
+        OSS-backed signed URL and fail clearly if the current environment cannot
+        provide one.
+        """
+        if isinstance(img_url, str) and img_url.startswith(("http://", "https://")):
+            image_ref = img_url
+        else:
+            image_ref = img_path or img_url
+
+        if not image_ref:
+            raise ValueError("Vidu image input requires img_path or img_url")
+
+        resolved = resolve_media_input(
+            image_ref,
+            model_name=model_name or self.model_name,
+            modality="image",
+            backend="vendor",
+            uploader=OSSImageUploader(),
+        )
+        return resolved.value
+
     def generate(self, prompt: str, output_path: str, img_url: str = None,
                  img_path: str = None, **kwargs) -> Tuple[str, float]:
         """Generate video using Vidu API (T2V or I2V)."""
@@ -59,7 +92,11 @@ class ViduModel(VideoGenModel):
         if is_i2v:
             task_id, used_model = self._submit_i2v(
                 prompt=prompt,
-                image_url=img_url or img_path,
+                image_url=self._resolve_vendor_image_input(
+                    img_url=img_url,
+                    img_path=img_path,
+                    model_name=kwargs.get("model"),
+                ),
                 model=kwargs.get("model"),
                 duration=duration,
                 resolution=resolution,

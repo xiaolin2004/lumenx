@@ -25,6 +25,25 @@ const getApiUrl = (): string => {
 
 export const API_URL = getApiUrl();
 
+export type ProviderMode = "dashscope" | "vendor";
+
+export interface EnvConfigPayload {
+    DASHSCOPE_API_KEY?: string;
+    ALIBABA_CLOUD_ACCESS_KEY_ID?: string;
+    ALIBABA_CLOUD_ACCESS_KEY_SECRET?: string;
+    OSS_BUCKET_NAME?: string;
+    OSS_ENDPOINT?: string;
+    OSS_BASE_PATH?: string;
+    KLING_PROVIDER_MODE?: ProviderMode;
+    VIDU_PROVIDER_MODE?: ProviderMode;
+    PIXVERSE_PROVIDER_MODE?: ProviderMode;
+    KLING_ACCESS_KEY?: string;
+    KLING_SECRET_KEY?: string;
+    VIDU_API_KEY?: string;
+    endpoint_overrides?: Record<string, string>;
+    [key: string]: string | Record<string, string> | undefined;
+}
+
 export interface VideoTask {
     id: string;
     project_id: string;
@@ -523,12 +542,12 @@ export const api = {
         return res.data;
     },
 
-    getEnvConfig: async () => {
-        const res = await axios.get(`${API_URL}/config/env`);
+    getEnvConfig: async (): Promise<EnvConfigPayload> => {
+        const res = await axios.get<EnvConfigPayload>(`${API_URL}/config/env`);
         return res.data;
     },
 
-    saveEnvConfig: async (config: Record<string, string | Record<string, string> | undefined>) => {
+    saveEnvConfig: async (config: EnvConfigPayload) => {
         const res = await axios.post(`${API_URL}/config/env`, config, {
             timeout: 60000, // 60 seconds timeout
         });

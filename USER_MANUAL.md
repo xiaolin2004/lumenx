@@ -55,6 +55,53 @@ LumenX 使用阿里云灵积平台(DashScope)提供 AI 能力。
 
 ---
 
+## 🧩 运行模式说明（含必填项）
+
+LumenX 的媒体存储是 **本地优先**：
+
+- 所有素材先落盘到 `output/`；
+- OSS 仅在你配置后作为“可选镜像 + 签名 URL”使用；
+- Kling/Vidu 默认跟随 DashScope，可按需切到原厂。
+
+### 模式 1：DashScope-only（推荐起步）
+
+- 适用：不配置 OSS，不走 Kling/Vidu 原厂。
+- 必填：
+  - `DASHSCOPE_API_KEY`
+
+### 模式 2：DashScope + OSS（可选增强）
+
+- 适用：希望保留本地文件，同时在 OSS 做镜像和 URL 服务。
+- 必填：
+  - `DASHSCOPE_API_KEY`
+  - `ALIBABA_CLOUD_ACCESS_KEY_ID`
+  - `ALIBABA_CLOUD_ACCESS_KEY_SECRET`
+  - `OSS_BUCKET_NAME`
+  - `OSS_ENDPOINT`
+- 可选：
+  - `OSS_BASE_PATH`
+
+### 模式 3：DashScope-first + Kling 原厂
+
+- 适用：仅 Kling 走原厂，其它继续走 DashScope。
+- 必填：
+  - `DASHSCOPE_API_KEY`
+  - `KLING_PROVIDER_MODE=vendor`
+  - `KLING_ACCESS_KEY`
+  - `KLING_SECRET_KEY`
+
+### 模式 4：DashScope-first + Vidu 原厂
+
+- 适用：仅 Vidu 走原厂，其它继续走 DashScope。
+- 必填：
+  - `DASHSCOPE_API_KEY`
+  - `VIDU_PROVIDER_MODE=vendor`
+  - `VIDU_API_KEY`
+
+> 提示：是否配置 OSS 与是否选择 Kling/Vidu 原厂是两个独立开关，可组合使用。
+
+---
+
 ## ☁️ OSS 存储配置（可选）
 
 OSS 配置用于云端存储生成的资产，适合团队协作或跨设备使用。

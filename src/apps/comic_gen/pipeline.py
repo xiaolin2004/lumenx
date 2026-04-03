@@ -17,6 +17,7 @@ from .audio import AudioGenerator
 from .export import ExportManager
 from ...utils import get_logger
 from ...utils.oss_utils import is_object_key
+from ...utils.provider_registry import resolve_provider_backend
 from ...utils.system_check import get_ffmpeg_path, get_ffmpeg_install_instructions
 
 logger = get_logger(__name__)
@@ -71,6 +72,24 @@ class ComicGenPipeline:
         # Cached model instances for Kling/Vidu (lazily initialized)
         self._kling_model = None
         self._vidu_model = None
+
+    def _resolve_video_backend(self, model_name: str) -> str:
+        try:
+            return resolve_provider_backend(model_name)
+        except (KeyError, ValueError):
+            logger.debug(
+                "Provider backend not registered for video model %s, defaulting to dashscope.",
+                model_name,
+            )
+            return "dashscope"
+        except Exception as e:
+            logger.warning(
+                "Unexpected error resolving provider backend for video model %s: %s. "
+                "Falling back to dashscope.",
+                model_name,
+                e,
+            )
+            return "dashscope"
 
     # ... (existing methods)
 
@@ -1990,9 +2009,17 @@ class ComicGenPipeline:
             img_url = task.image_url
 
             # Route to the appropriate model based on task.model
-            model_prefix = (task.model or "").split("-")[0] if task.model else ""
+            model_name = task.model or ""
+            model_name_lower = model_name.lower()
+            backend = self._resolve_video_backend(model_name)
+            use_vendor_kling = backend == "vendor" and model_name_lower.startswith("kling-")
+            use_vendor_vidu = backend == "vendor" and (
+                model_name_lower.startswith("vidu")
+                or model_name_lower.startswith("viduq2")
+                or model_name_lower.startswith("viduq3")
+            )
 
-            if model_prefix in ("kling",):
+            if use_vendor_kling:
                 # Use Kling model (cached)
                 if self._kling_model is None:
                     from ...models.kling import KlingModel
@@ -2010,7 +2037,7 @@ class ComicGenPipeline:
                     sound=task.sound or "off",
                     cfg_scale=task.cfg_scale,
                 )
-            elif model_prefix in ("vidu", "viduq2", "viduq3"):
+            elif use_vendor_vidu:
                 # Use Vidu model (cached)
                 if self._vidu_model is None:
                     from ...models.vidu import ViduModel

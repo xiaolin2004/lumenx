@@ -1,3 +1,5 @@
+import base64
+import mimetypes
 import os
 import time
 import requests
@@ -8,9 +10,11 @@ from .base import VideoGenModel
 from ..utils import get_logger
 from ..utils.endpoints import get_provider_base_url
 
-from typing import Tuple
+from typing import Callable, Dict, List, Mapping, Optional, Tuple
 
 from ..utils.oss_utils import OSSImageUploader
+from ..utils.provider_media import resolve_media_input, resolve_media_inputs
+from ..utils.provider_registry import resolve_provider_backend
 
 logger = get_logger(__name__)
 
@@ -27,6 +31,182 @@ class WanxModel(VideoGenModel):
         if not api_key:
             logger.warning("Dashscope API Key not found in config or environment variables.")
         return api_key
+
+    def _resolve_provider_backend_for_model(self, model_name: str) -> str:
+        try:
+            return resolve_provider_backend(model_name)
+        except (KeyError, ValueError):
+            logger.debug(
+                "Provider backend not registered for model %s, defaulting to dashscope.",
+                model_name,
+            )
+            return "dashscope"
+        except Exception as e:
+            logger.warning(
+                "Unexpected error resolving provider backend for model %s: %s. "
+                "Falling back to dashscope.",
+                model_name,
+                e,
+            )
+            return "dashscope"
+
+    def _resolver_model_for_media(self, model_name: str) -> str:
+        # `wan2.5-i2v` follows the same DashScope media transport profile as `wan2.6-i2v`.
+        if (model_name or "").strip().lower() == "wan2.5-i2v":
+            return "wan2.6-i2v"
+        return model_name
+
+    def _build_dashscope_temp_url_resolver(self, model_name: str) -> Callable[[str], str]:
+        return lambda local_path: self._create_dashscope_temp_url(local_path, model_name)
+
+    @staticmethod
+    def _merge_media_headers(target: Dict[str, str], source: Optional[Mapping[str, str]]) -> None:
+        if not source:
+            return
+        for key, value in source.items():
+            if value:
+                target[key] = value
+
+    def _encode_local_image_as_data_uri(self, local_path: str) -> str:
+        mime_type, _ = mimetypes.guess_type(local_path)
+        if not mime_type:
+            mime_type = "image/png"
+        with open(local_path, "rb") as f:
+            encoded = base64.b64encode(f.read()).decode("ascii")
+        return f"data:{mime_type};base64,{encoded}"
+
+    def _resolve_sdk_image_input(
+        self,
+        *,
+        model_name: str,
+        img_path: Optional[str],
+        img_url: Optional[str],
+        uploader,
+    ) -> Optional[str]:
+        """
+        Resolve image input for SDK-based I2V calls.
+
+        This keeps DashScope provider-mode routing consistent for non-Wan model
+        names (e.g. Kling/Vidu via DashScope) and prevents raw local filesystem
+        paths from leaking into SDK payloads.
+        """
+        image_ref = img_path or img_url
+        if not image_ref:
+            return img_url
+
+        resolver_model = self._resolver_model_for_media(model_name)
+        backend = self._resolve_provider_backend_for_model(resolver_model)
+        temp_url_resolver = self._build_dashscope_temp_url_resolver(resolver_model)
+
+        try:
+            resolved_image = resolve_media_input(
+                image_ref,
+                model_name=resolver_model,
+                modality="image",
+                backend=backend,
+                uploader=uploader,
+                dashscope_temp_url_resolver=temp_url_resolver,
+            )
+            if resolved_image.headers:
+                logger.warning(
+                    "SDK path for model %s received additional media headers %s; "
+                    "continuing with resolved image value only.",
+                    model_name,
+                    list(resolved_image.headers.keys()),
+                )
+            return resolved_image.value
+        except Exception as e:
+            logger.warning(
+                "Failed to resolve SDK image input via provider-media for model %s: %s. "
+                "Falling back to raw image reference handling.",
+                model_name,
+                e,
+            )
+
+        local_candidate = None
+        if img_path and os.path.exists(img_path):
+            local_candidate = img_path
+        elif isinstance(img_url, str) and os.path.exists(img_url):
+            local_candidate = img_url
+
+        if local_candidate:
+            return self._encode_local_image_as_data_uri(local_candidate)
+        return img_url
+
+    def _create_dashscope_temp_url(self, local_path: str, model_name: str) -> str:
+        """
+        Upload a local file to DashScope temporary storage and return an `oss://` URL.
+        """
+        if not os.path.exists(local_path):
+            raise FileNotFoundError(f"Local media file not found: {local_path}")
+
+        base = get_provider_base_url("DASHSCOPE")
+        policy_url = f"{base}/api/v1/uploads"
+        headers = {"Authorization": f"Bearer {self.api_key}"}
+
+        policy_resp = requests.get(
+            policy_url,
+            params={"action": "getPolicy", "model": model_name},
+            headers=headers,
+            timeout=30,
+        )
+        if policy_resp.status_code != 200:
+            raise RuntimeError(
+                f"Failed to get DashScope upload policy (HTTP {policy_resp.status_code}): "
+                f"{policy_resp.text}"
+            )
+
+        policy_body = policy_resp.json()
+        policy_data = policy_body.get("output") or policy_body.get("data") or policy_body
+
+        upload_host = policy_data.get("upload_host") or policy_data.get("host")
+        if not upload_host:
+            raise RuntimeError(f"DashScope upload policy missing upload_host: {policy_body}")
+
+        upload_dir = policy_data.get("upload_dir") or policy_data.get("dir") or ""
+        object_key = (
+            policy_data.get("upload_file_path")
+            or policy_data.get("object_key")
+            or policy_data.get("key")
+            or policy_data.get("file_path")
+        )
+        if not object_key:
+            filename = os.path.basename(local_path)
+            object_key = f"{upload_dir.rstrip('/')}/{filename}" if upload_dir else filename
+
+        form_data: Dict[str, str] = {"key": object_key}
+        field_map = {
+            "policy": "policy",
+            "signature": "signature",
+            "oss_access_key_id": "OSSAccessKeyId",
+            "x_oss_security_token": "x-oss-security-token",
+            "x_oss_signature_version": "x-oss-signature-version",
+            "x_oss_credential": "x-oss-credential",
+            "x_oss_date": "x-oss-date",
+            "x_oss_signature": "x-oss-signature",
+            "success_action_status": "success_action_status",
+            "callback": "callback",
+        }
+        for source_key, target_key in field_map.items():
+            value = policy_data.get(source_key)
+            if value:
+                form_data[target_key] = str(value)
+
+        for key, value in policy_data.items():
+            if key.startswith("x-oss-") and value and key not in form_data:
+                form_data[key] = str(value)
+
+        with open(local_path, "rb") as file_handle:
+            files = {"file": (os.path.basename(local_path), file_handle)}
+            upload_resp = requests.post(upload_host, data=form_data, files=files, timeout=120)
+
+        if upload_resp.status_code not in (200, 201, 204):
+            raise RuntimeError(
+                f"Failed to upload temp media to DashScope (HTTP {upload_resp.status_code}): "
+                f"{upload_resp.text}"
+            )
+
+        return f"oss://{object_key}"
 
     def generate(self, prompt: str, output_path: str, img_path: str = None, model_name: str = None, **kwargs) ->Tuple[str, float]:
         # Determine model - allow explicit override via model_name param or 'model' kwarg
@@ -73,46 +253,53 @@ class WanxModel(VideoGenModel):
         try:
             api_start_time = time.time()
 
-            # Get image URL (upload local file if needed, or convert Object Key to signed URL)
             img_url = kwargs.get('img_url')
             uploader = OSSImageUploader()
-            
-            if img_path:
-                if os.path.exists(img_path):
-                    # Local file - upload to OSS and get signed URL
-                    if uploader.is_configured:
-                        logger.info(f"Uploading input image to OSS: {img_path}")
-                        object_key = uploader.upload_file(img_path, sub_path="temp/i2v_input")
-                        if object_key:
-                            img_url = uploader.sign_url_for_api(object_key)
-                            logger.info(f"Input image uploaded, signed URL: {img_url[:80]}...")
-                        else:
-                            raise RuntimeError("Failed to upload input image to OSS")
-                    else:
-                        raise RuntimeError("OSS not configured, cannot upload input image for I2V")
-                elif img_path.startswith("http"):
-                    # Already a URL
-                    img_url = img_path
-                elif "/" in img_path and not img_path.startswith("output/"):
-                    # Might be an Object Key, generate signed URL
-                    if uploader.is_configured:
-                        img_url = uploader.sign_url_for_api(img_path)
-                        logger.info(f"Input image (Object Key from img_path), signed URL: {img_url[:80]}...")
-                    else:
-                        raise RuntimeError(f"OSS not configured, cannot sign Object Key: {img_path}")
-                else:
-                    raise ValueError(f"Input image not found: {img_path}")
-            elif img_url:
-                # If img_url is provided but img_path is not, check if img_url is an Object Key
-                if not img_url.startswith("http") and "/" in img_url and not img_url.startswith("output/"):
-                    if uploader.is_configured:
-                        img_url = uploader.sign_url_for_api(img_url)
-                        logger.info(f"Input image (Object Key from img_url), signed URL: {img_url[:80]}...")
-                    else:
-                        logger.warning(f"OSS not configured, cannot sign Object Key in img_url: {img_url}")
+            extra_media_headers: Dict[str, str] = {}
 
             # Use HTTP API for wan2.6-i2v, wan2.5-i2v, or wan2.6-r2v
             if final_model_name in ['wan2.6-i2v', 'wan2.6-i2v-flash', 'wan2.5-i2v']:
+                resolver_model = self._resolver_model_for_media(final_model_name)
+                backend = self._resolve_provider_backend_for_model(resolver_model)
+                temp_url_resolver = self._build_dashscope_temp_url_resolver(resolver_model)
+
+                image_ref = img_path or img_url
+                if image_ref:
+                    resolved_image = resolve_media_input(
+                        image_ref,
+                        model_name=resolver_model,
+                        modality="image",
+                        backend=backend,
+                        uploader=uploader,
+                        dashscope_temp_url_resolver=temp_url_resolver,
+                    )
+                    # For Wan I2V, keep local no-OSS image inputs URL-based just like audio/video
+                    # (oss:// + X-DashScope-OssResourceResolve), not data URIs.
+                    if resolved_image.value.startswith("data:image/"):
+                        resolved_image = resolve_media_input(
+                            image_ref,
+                            model_name=resolver_model,
+                            modality="reference_video",
+                            backend=backend,
+                            uploader=uploader,
+                            dashscope_temp_url_resolver=temp_url_resolver,
+                        )
+
+                    img_url = resolved_image.value
+                    self._merge_media_headers(extra_media_headers, resolved_image.headers)
+
+                if audio_url:
+                    resolved_audio = resolve_media_input(
+                        audio_url,
+                        model_name=resolver_model,
+                        modality="audio",
+                        backend=backend,
+                        uploader=uploader,
+                        dashscope_temp_url_resolver=temp_url_resolver,
+                    )
+                    audio_url = resolved_audio.value
+                    self._merge_media_headers(extra_media_headers, resolved_audio.headers)
+
                 # Get shot_type from kwargs (only for wan I2V models)
                 shot_type = kwargs.get('shot_type', 'single')
                 video_url = self._generate_wan_i2v_http(
@@ -126,54 +313,30 @@ class WanxModel(VideoGenModel):
                     audio_url=audio_url,
                     watermark=watermark,
                     seed=seed,
-                    shot_type=shot_type
+                    shot_type=shot_type,
+                    extra_headers=extra_media_headers,
                 )
             elif final_model_name == 'wan2.6-r2v':
                 # R2V generation
                 ref_video_urls = kwargs.get('ref_video_urls', [])
                 if not ref_video_urls:
                     raise ValueError("ref_video_urls is required for wan2.6-r2v")
-                
-                # Process ref_video_urls: Upload local files or sign Object Keys
-                processed_ref_urls = []
-                for ref_url in ref_video_urls:
-                    final_url = ref_url
-                    
-                    # Check if it's a local file
-                    local_path = None
-                    if not ref_url.startswith("http"):
-                        # Check relative to output dir
-                        potential_path = os.path.join("output", ref_url)
-                        if os.path.exists(potential_path):
-                            local_path = potential_path
-                        # Check absolute path or relative to CWD
-                        elif os.path.exists(ref_url):
-                            local_path = ref_url
-                    
-                    if local_path:
-                        # Local file - upload to OSS
-                        if uploader.is_configured:
-                            logger.info(f"Uploading reference video to OSS: {local_path}")
-                            object_key = uploader.upload_file(local_path, sub_path="temp/r2v_input")
-                            if object_key:
-                                final_url = uploader.sign_url_for_api(object_key)
-                                logger.info(f"Reference video uploaded, signed URL: {final_url[:80]}...")
-                            else:
-                                raise RuntimeError(f"Failed to upload reference video: {local_path}")
-                        else:
-                            raise RuntimeError("OSS not configured, cannot upload local reference video for R2V")
-                    
-                    elif not ref_url.startswith("http") and "/" in ref_url and not ref_url.startswith("output/"):
-                        # Likely an Object Key
-                        if uploader.is_configured:
-                            final_url = uploader.sign_url_for_api(ref_url)
-                            logger.info(f"Reference video (Object Key), signed URL: {final_url[:80]}...")
-                        else:
-                            logger.warning(f"OSS not configured, cannot sign Object Key: {ref_url}")
-                            
-                    processed_ref_urls.append(final_url)
-                
-                ref_video_urls = processed_ref_urls
+
+                resolver_model = self._resolver_model_for_media(final_model_name)
+                backend = self._resolve_provider_backend_for_model(resolver_model)
+                temp_url_resolver = self._build_dashscope_temp_url_resolver(resolver_model)
+
+                resolved_ref_urls = resolve_media_inputs(
+                    ref_video_urls,
+                    model_name=resolver_model,
+                    modality="reference_video",
+                    backend=backend,
+                    uploader=uploader,
+                    dashscope_temp_url_resolver=temp_url_resolver,
+                )
+                ref_video_urls = [item.value for item in resolved_ref_urls]
+                for resolved_item in resolved_ref_urls:
+                    self._merge_media_headers(extra_media_headers, resolved_item.headers)
                 
                 shot_type = kwargs.get('shot_type', 'multi') # Default to multi for R2V as per PRD
                 
@@ -185,10 +348,18 @@ class WanxModel(VideoGenModel):
                     duration=duration,
                     audio=kwargs.get('audio', True), # Default to True for R2V
                     shot_type=shot_type,
-                    seed=seed
+                    seed=seed,
+                    extra_headers=extra_media_headers,
                 )
             else:
                 # Use SDK for other models
+                if img_path or img_url:
+                    img_url = self._resolve_sdk_image_input(
+                        model_name=final_model_name,
+                        img_path=img_path,
+                        img_url=img_url,
+                        uploader=uploader,
+                    )
                 video_url = self._generate_sdk(
                     prompt=prompt,
                     model_name=final_model_name,
@@ -223,7 +394,8 @@ class WanxModel(VideoGenModel):
                                   duration: int = 5, prompt_extend: bool = True,
                                   negative_prompt: str = None, audio_url: str = None,
                                   watermark: bool = False, seed: int = None,
-                                  shot_type: str = "single") -> str:
+                                  shot_type: str = "single",
+                                  extra_headers: Optional[Mapping[str, str]] = None) -> str:
         """Generate video using Wan I2V (2.5 or 2.6) via HTTP API (asynchronous with polling)."""
         base = get_provider_base_url("DASHSCOPE")
         create_url = f"{base}/api/v1/services/aigc/video-generation/video-synthesis"
@@ -233,6 +405,8 @@ class WanxModel(VideoGenModel):
             "Authorization": f"Bearer {self.api_key}",
             "X-DashScope-Async": "enable"  # Required for async mode
         }
+        if extra_headers:
+            headers.update(dict(extra_headers))
         
         payload = {
             "model": model_name,  # Use passed model name (wan2.5-i2v or wan2.6-i2v)
@@ -328,7 +502,8 @@ class WanxModel(VideoGenModel):
     def _generate_wan_r2v_http(self, prompt: str, ref_video_urls: list, model_name: str = "wan2.6-r2v",
                                   size: str = "1280*720", 
                                   duration: int = 5, audio: bool = True,
-                                  shot_type: str = "multi", seed: int = None) -> str:
+                                  shot_type: str = "multi", seed: int = None,
+                                  extra_headers: Optional[Mapping[str, str]] = None) -> str:
         """Generate video using Wan R2V via HTTP API (asynchronous with polling)."""
         base = get_provider_base_url("DASHSCOPE")
         create_url = f"{base}/api/v1/services/aigc/video-generation/video-synthesis"
@@ -338,6 +513,8 @@ class WanxModel(VideoGenModel):
             "Authorization": f"Bearer {self.api_key}",
             "X-DashScope-Async": "enable"
         }
+        if extra_headers:
+            headers.update(dict(extra_headers))
         
         payload = {
             "model": model_name,

@@ -10,7 +10,10 @@ import dashscope
 from dashscope import ImageSynthesis
 from ..utils import get_logger
 from ..utils.endpoints import get_provider_base_url
+from ..utils.media_refs import MEDIA_REF_UNKNOWN, classify_media_ref
 from ..utils.oss_utils import OSSImageUploader
+from ..utils.provider_media import resolve_media_input
+from ..utils.provider_registry import resolve_provider_backend
 
 logger = get_logger(__name__)
 
@@ -333,37 +336,48 @@ class WanxImageModel(ImageGenModel):
         
         raise RuntimeError(f"Wan 2.6 Image task timed out after {max_wait_time}s")
 
-    def _resolve_wan26_reference_image(self, path: str) -> str:
-        if os.path.exists(path):
-            uploader = OSSImageUploader()
-            if uploader.is_configured:
-                object_key = uploader.upload_file(path, sub_path="temp/ref_images")
-                if object_key:
-                    signed_url = uploader.sign_url_for_api(object_key)
-                    logger.info(f"Reference image uploaded, signed URL: {signed_url[:80]}...")
-                    return signed_url
+    def _resolve_wan26_reference_image(self, path: str, model_name: str = "wan2.6-image") -> str:
+        uploader = OSSImageUploader()
+        backend = self._resolve_provider_backend_for_model(model_name)
 
-            data_uri = self._encode_local_image_as_data_uri(path)
-            logger.info("OSS not configured, using base64 data URI for local reference image")
-            return data_uri
+        try:
+            resolved = resolve_media_input(
+                path,
+                model_name=model_name,
+                modality="image",
+                backend=backend,
+                uploader=uploader,
+            )
+            return resolved.value
+        except ValueError as e:
+            ref_type = classify_media_ref(path)
+            if ref_type == MEDIA_REF_UNKNOWN and os.path.isabs(path) and os.path.exists(path):
+                # Compatibility fallback: only for legacy absolute local paths
+                # outside managed `output/` media refs.
+                if uploader.is_configured:
+                    object_key = uploader.upload_file(path, sub_path="temp/ref_images")
+                    if object_key:
+                        signed_url = uploader.sign_url_for_api(object_key)
+                        if signed_url:
+                            return signed_url
 
-        if path.startswith("http"):
-            return path
+                return self._encode_local_image_as_data_uri(path)
 
-        from ..utils.oss_utils import is_object_key
-
-        if is_object_key(path):
-            uploader = OSSImageUploader()
-            if uploader.is_configured:
-                signed_url = uploader.sign_url_for_api(path)
-                logger.info(f"Reference image (Object Key), signed URL: {signed_url[:80]}...")
-                return signed_url
-
-            logger.warning(f"OSS not configured but Object Key provided: {path}")
+            logger.warning(f"Reference image could not be resolved: {path}, reason: {e}")
             return None
 
-        logger.warning(f"Reference image not found: {path}")
-        return None
+    def _resolve_provider_backend_for_model(self, model_name: str) -> str:
+        try:
+            return resolve_provider_backend(model_name)
+        except (KeyError, ValueError):
+            # Keep image flows resilient for models not yet registered.
+            return "dashscope"
+        except Exception as e:
+            logger.warning(
+                f"Unexpected error resolving provider backend for model {model_name}: {e}. "
+                "Falling back to dashscope."
+            )
+            return "dashscope"
 
     def _encode_local_image_as_data_uri(self, path: str) -> str:
         mime_type, _ = mimetypes.guess_type(path)
