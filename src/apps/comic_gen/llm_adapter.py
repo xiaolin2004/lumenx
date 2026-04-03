@@ -61,7 +61,7 @@ class LLMAdapter:
     def _get_default_model(self) -> str:
         if self.provider == "openai":
             return os.getenv("OPENAI_MODEL", "gpt-4o")
-        return "qwen3.5-plus"
+        return os.getenv("LLM_MODEL", "qwen3.5-plus")
 
     def chat(
         self,

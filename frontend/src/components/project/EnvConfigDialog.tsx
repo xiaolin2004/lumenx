@@ -13,6 +13,10 @@ interface EnvConfigDialogProps {
 
 type EnvConfig = EnvConfigPayload & {
   DASHSCOPE_API_KEY: string;
+  LLM_PROVIDER: string;
+  LLM_MODEL: string;
+  OPENAI_API_KEY: string;
+  OPENAI_BASE_URL: string;
   ALIBABA_CLOUD_ACCESS_KEY_ID: string;
   ALIBABA_CLOUD_ACCESS_KEY_SECRET: string;
   OSS_BUCKET_NAME: string;
@@ -35,6 +39,10 @@ const ENDPOINT_PROVIDERS = [
 
 const DEFAULT_CONFIG: EnvConfig = {
   DASHSCOPE_API_KEY: "",
+  LLM_PROVIDER: "dashscope",
+  LLM_MODEL: "",
+  OPENAI_API_KEY: "",
+  OPENAI_BASE_URL: "",
   ALIBABA_CLOUD_ACCESS_KEY_ID: "",
   ALIBABA_CLOUD_ACCESS_KEY_SECRET: "",
   OSS_BUCKET_NAME: "",
@@ -50,10 +58,12 @@ const DEFAULT_CONFIG: EnvConfig = {
 };
 
 const normalizeProviderMode = (mode?: string): ProviderMode => (mode === "vendor" ? "vendor" : "dashscope");
+const normalizeLlmProvider = (p?: string): string => (p === "openai" ? "openai" : "dashscope");
 
 const normalizeEnvConfig = (existing: EnvConfig, data?: EnvConfigPayload): EnvConfig => ({
   ...existing,
   ...data,
+  LLM_PROVIDER: normalizeLlmProvider(data?.LLM_PROVIDER ?? existing.LLM_PROVIDER),
   KLING_PROVIDER_MODE: normalizeProviderMode(data?.KLING_PROVIDER_MODE ?? existing.KLING_PROVIDER_MODE),
   VIDU_PROVIDER_MODE: normalizeProviderMode(data?.VIDU_PROVIDER_MODE ?? existing.VIDU_PROVIDER_MODE),
   PIXVERSE_PROVIDER_MODE: normalizeProviderMode(data?.PIXVERSE_PROVIDER_MODE ?? existing.PIXVERSE_PROVIDER_MODE),
@@ -227,6 +237,45 @@ export default function EnvConfigDialog({ isOpen, onClose, isRequired = false }:
                     placeholder="Required for DashScope-first model routing"
                     className={inputClass}
                   />
+                </div>
+
+                <div className="pt-4 border-t border-white/10">
+                  <h3 className="text-sm font-bold text-white mb-4">LLM 配置</h3>
+                  <div className="bg-white/5 border border-white/10 rounded-lg p-4 space-y-4">
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" onClick={() => handleChange("LLM_PROVIDER", "dashscope")} className={modeButtonClass(config.LLM_PROVIDER !== "openai")}>
+                        DashScope
+                      </button>
+                      <button type="button" onClick={() => handleChange("LLM_PROVIDER", "openai")} className={modeButtonClass(config.LLM_PROVIDER === "openai")}>
+                        OpenAI-compatible
+                      </button>
+                    </div>
+                    <p className="text-xs text-gray-500">
+                      DashScope mode uses your DashScope API key for LLM calls. OpenAI-compatible mode supports OpenAI, DeepSeek, Ollama, etc.
+                    </p>
+                    {config.LLM_PROVIDER !== "openai" ? (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-300 mb-2">LLM Model</label>
+                        <input type="text" value={config.LLM_MODEL} onChange={(e) => handleChange("LLM_MODEL", e.target.value)} placeholder="qwen3.5-plus" className={inputClass} />
+                        <p className="text-[10px] text-gray-500 mt-1">Leave empty to use the default (qwen3.5-plus)</p>
+                      </div>
+                    ) : (
+                      <>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-300 mb-2">OpenAI API Key <span className="text-red-500">*</span></label>
+                          <input type="password" value={config.OPENAI_API_KEY} onChange={(e) => handleChange("OPENAI_API_KEY", e.target.value)} placeholder="sk-..." className={inputClass} />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-300 mb-2">Base URL</label>
+                          <input type="text" value={config.OPENAI_BASE_URL} onChange={(e) => handleChange("OPENAI_BASE_URL", e.target.value)} placeholder="https://api.openai.com/v1" className={inputClass} />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-300 mb-2">Model</label>
+                          <input type="text" value={config.LLM_MODEL} onChange={(e) => handleChange("LLM_MODEL", e.target.value)} placeholder="gpt-4o" className={inputClass} />
+                        </div>
+                      </>
+                    )}
+                  </div>
                 </div>
 
                 <div className="bg-white/5 border border-white/10 rounded-lg p-4 space-y-4">

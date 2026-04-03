@@ -29,6 +29,10 @@ export type ProviderMode = "dashscope" | "vendor";
 
 export interface EnvConfigPayload {
     DASHSCOPE_API_KEY?: string;
+    LLM_PROVIDER?: string;
+    LLM_MODEL?: string;
+    OPENAI_API_KEY?: string;
+    OPENAI_BASE_URL?: string;
     ALIBABA_CLOUD_ACCESS_KEY_ID?: string;
     ALIBABA_CLOUD_ACCESS_KEY_SECRET?: string;
     OSS_BUCKET_NAME?: string;

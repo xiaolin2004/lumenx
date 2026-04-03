@@ -650,6 +650,10 @@ async def import_file_confirm(request: ConfirmImportRequest):
 
 class EnvConfig(ProviderRoutingConfig):
     DASHSCOPE_API_KEY: Optional[str] = None
+    LLM_PROVIDER: Optional[str] = None
+    LLM_MODEL: Optional[str] = None
+    OPENAI_API_KEY: Optional[str] = None
+    OPENAI_BASE_URL: Optional[str] = None
     ALIBABA_CLOUD_ACCESS_KEY_ID: Optional[str] = None
     ALIBABA_CLOUD_ACCESS_KEY_SECRET: Optional[str] = None
     OSS_BUCKET_NAME: Optional[str] = None
@@ -2013,6 +2017,10 @@ async def get_env_config():
 
         return {
             "DASHSCOPE_API_KEY": os.getenv("DASHSCOPE_API_KEY", ""),
+            "LLM_PROVIDER": os.getenv("LLM_PROVIDER", "dashscope"),
+            "LLM_MODEL": os.getenv("LLM_MODEL", ""),
+            "OPENAI_API_KEY": os.getenv("OPENAI_API_KEY", ""),
+            "OPENAI_BASE_URL": os.getenv("OPENAI_BASE_URL", ""),
             "ALIBABA_CLOUD_ACCESS_KEY_ID": os.getenv("ALIBABA_CLOUD_ACCESS_KEY_ID", ""),
             "ALIBABA_CLOUD_ACCESS_KEY_SECRET": os.getenv("ALIBABA_CLOUD_ACCESS_KEY_SECRET", ""),
             "OSS_BUCKET_NAME": os.getenv("OSS_BUCKET_NAME", ""),
