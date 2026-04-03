@@ -316,7 +316,7 @@ class WanxModel(VideoGenModel):
                     shot_type=shot_type,
                     extra_headers=extra_media_headers,
                 )
-            elif final_model_name == 'wan2.6-r2v':
+            elif final_model_name in ('wan2.6-r2v', 'wan2.7-r2v'):
                 # R2V generation
                 ref_video_urls = kwargs.get('ref_video_urls', [])
                 if not ref_video_urls:

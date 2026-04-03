@@ -662,6 +662,7 @@ class EnvConfig(ProviderRoutingConfig):
     KLING_ACCESS_KEY: Optional[str] = None
     KLING_SECRET_KEY: Optional[str] = None
     VIDU_API_KEY: Optional[str] = None
+    SEEDANCE_API_KEY: Optional[str] = None
     endpoint_overrides: Dict[str, str] = Field(default_factory=dict)
 
 
@@ -2029,6 +2030,7 @@ async def get_env_config():
             "KLING_ACCESS_KEY": os.getenv("KLING_ACCESS_KEY", ""),
             "KLING_SECRET_KEY": os.getenv("KLING_SECRET_KEY", ""),
             "VIDU_API_KEY": os.getenv("VIDU_API_KEY", ""),
+            "SEEDANCE_API_KEY": os.getenv("SEEDANCE_API_KEY", ""),
             "KLING_PROVIDER_MODE": _normalize_provider_mode(os.getenv("KLING_PROVIDER_MODE")),
             "VIDU_PROVIDER_MODE": _normalize_provider_mode(os.getenv("VIDU_PROVIDER_MODE")),
             "PIXVERSE_PROVIDER_MODE": _normalize_provider_mode(os.getenv("PIXVERSE_PROVIDER_MODE")),

@@ -16,5 +16,5 @@ echo "========================================"
 cd "$(dirname "$0")"
 
 # 启动 uvicorn
-python -m uvicorn src.apps.comic_gen.api:app --reload --port 17177 --host 0.0.0.0
+python3 -m uvicorn src.apps.comic_gen.api:app --reload --port 17177 --host 0.0.0.0
 

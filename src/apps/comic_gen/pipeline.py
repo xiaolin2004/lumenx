@@ -72,6 +72,7 @@ class ComicGenPipeline:
         # Cached model instances for Kling/Vidu (lazily initialized)
         self._kling_model = None
         self._vidu_model = None
+        self._seedance_model = None
 
     def _resolve_video_backend(self, model_name: str) -> str:
         try:
@@ -2018,8 +2019,26 @@ class ComicGenPipeline:
                 or model_name_lower.startswith("viduq2")
                 or model_name_lower.startswith("viduq3")
             )
+            use_vendor_seedance = (
+                model_name_lower.startswith("seedance-")
+                or model_name_lower.startswith("doubao-seedance-")
+            )
 
-            if use_vendor_kling:
+            if use_vendor_seedance:
+                # Use Seedance model (cached)
+                if self._seedance_model is None:
+                    from ...models.seedance import SeedanceModel
+                    self._seedance_model = SeedanceModel({})
+                video_path, _ = self._seedance_model.generate(
+                    prompt=task.prompt,
+                    output_path=output_path,
+                    img_url=img_url,
+                    img_path=img_path,
+                    duration=task.duration,
+                    model=task.model,
+                    resolution=(task.resolution or "720p").lower(),
+                )
+            elif use_vendor_kling:
                 # Use Kling model (cached)
                 if self._kling_model is None:
                     from ...models.kling import KlingModel
