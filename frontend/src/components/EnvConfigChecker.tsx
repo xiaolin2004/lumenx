@@ -19,6 +19,11 @@ export default function EnvConfigChecker() {
 
   const checkEnvConfig = async () => {
     try {
+      const authStatus = await api.getEntryAuthStatus();
+      if (authStatus.enabled && !authStatus.authenticated) {
+        return;
+      }
+
       const config = await api.getEnvConfig();
       // 空值和空字符串都视为未配置
       const dashscopeKey = config.DASHSCOPE_API_KEY?.trim();
@@ -30,6 +35,10 @@ export default function EnvConfigChecker() {
       }
     } catch (error) {
       console.error("Failed to check env config:", error);
+      const status = error && typeof error === "object" ? (error as any)?.response?.status : undefined;
+      if (status === 401) {
+        return;
+      }
       // 如果API调用失败，也显示配置对话框
       setEnvRequired(true);
       setIsEnvDialogOpen(true);
