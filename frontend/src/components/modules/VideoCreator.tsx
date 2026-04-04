@@ -16,9 +16,9 @@ import {
 
 
 
-import { useProjectStore } from "@/store/projectStore";
+import { useProjectStore, getVideoModelsForMode } from "@/store/projectStore";
 import { api, API_URL, VideoTask } from "@/lib/api";
-import { getAssetUrl, getAssetUrlWithTimestamp } from "@/lib/utils";
+import { getAssetUrl, getAssetUrlWithTimestamp, extractErrorDetail } from "@/lib/utils";
 import PromptBuilder, { PromptSegment, PromptBuilderRef } from "./PromptBuilder";
 import type { VideoParams } from "@/store/projectStore";
 
@@ -33,6 +33,8 @@ interface VideoCreatorProps {
 export default function VideoCreator({ onTaskCreated, remixData, onRemixClear, params, onParamsChange }: VideoCreatorProps) {
     const currentProject = useProjectStore((state) => state.currentProject);
     const updateProject = useProjectStore((state) => state.updateProject);
+    const defaultI2vModel = currentProject?.model_settings?.i2v_model || "wan2.5-i2v-preview";
+    const defaultR2vModel = currentProject?.model_settings?.r2v_model || getVideoModelsForMode("r2v").find((model) => model.id === "wan2.7-r2v")?.id || "wan2.6-r2v";
 
     // Helper function to generate motion description text
     const getMotionDescription = () => {
@@ -329,7 +331,7 @@ export default function VideoCreator({ onTaskCreated, remixData, onRemixClear, p
                 }
 
                 // Determine model based on generation mode
-                const actualModel = generationMode === 'r2v' ? 'wan2.6-r2v' : params.model;
+                const actualModel = params.model;
                 const referenceVideos = generationMode === 'r2v'
                     ? castSlots.filter(s => s.url).map(s => s.url)
                     : undefined;
@@ -394,9 +396,7 @@ export default function VideoCreator({ onTaskCreated, remixData, onRemixClear, p
                     frameId = frame ? frame.id : undefined;
                 }
 
-                // Determine model based on generation mode
-                // R2V mode uses wan2.6-r2v, I2V uses selected model
-                const actualModel = generationMode === 'r2v' ? 'wan2.6-r2v' : params.model;
+                const actualModel = params.model;
 
                 // Get reference video URLs from cast slots for R2V
                 const referenceVideos = generationMode === 'r2v'
@@ -440,9 +440,9 @@ export default function VideoCreator({ onTaskCreated, remixData, onRemixClear, p
 
             // Clear selection after successful submit
             // setSelectedImages([]); // Keep selection for iterative generation
-        } catch (error) {
+        } catch (error: any) {
             console.error("Failed to submit task:", error);
-            alert("提交失败");
+            alert(`提交失败：${extractErrorDetail(error, "未知错误，请重试")}`);
             // Refresh to remove optimistic updates
             const updatedProject = await api.getProject(currentProject.id);
             onTaskCreated(updatedProject);
@@ -554,7 +554,12 @@ export default function VideoCreator({ onTaskCreated, remixData, onRemixClear, p
                             <button
                                 onClick={() => {
                                     setGenerationMode("i2v");
-                                    onParamsChange({ generationMode: "i2v" });
+                                    onParamsChange({
+                                        generationMode: "i2v",
+                                        model: getVideoModelsForMode("i2v").some((model) => model.id === params.model)
+                                            ? params.model
+                                            : defaultI2vModel
+                                    });
                                 }}
                                 className={`px-5 py-2.5 text-sm rounded-lg flex items-center gap-2 transition-all font-medium ${generationMode === "i2v"
                                     ? "bg-primary text-white shadow-lg"
@@ -569,7 +574,9 @@ export default function VideoCreator({ onTaskCreated, remixData, onRemixClear, p
                                     setGenerationMode("r2v");
                                     onParamsChange({
                                         generationMode: "r2v",
-                                        model: "wan2.6-i2v" // Force Wan 2.6 when switching to R2V
+                                        model: getVideoModelsForMode("r2v").some((model) => model.id === params.model)
+                                            ? params.model
+                                            : defaultR2vModel
                                     });
                                 }}
                                 className={`px-5 py-2.5 text-sm rounded-lg flex items-center gap-2 transition-all font-medium ${generationMode === "r2v"

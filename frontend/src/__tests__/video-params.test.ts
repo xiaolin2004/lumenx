@@ -35,6 +35,7 @@ describe('I2V_MODELS 配置', () => {
         for (const model of I2V_MODELS) {
             expect(model.duration).toBeDefined();
             expect(['slider', 'buttons', 'fixed']).toContain(model.duration.type);
+            expect(model.generationModes.length).toBeGreaterThan(0);
         }
     });
 });
@@ -65,6 +66,24 @@ describe('Wan 2.6 模型参数', () => {
         expect(p.cfgScale).toBeUndefined();
         expect(p.viduAudio).toBeUndefined();
         expect(p.movementAmplitude).toBeUndefined();
+    });
+});
+
+describe('Wan R2V 模型参数', () => {
+    const wan27 = I2V_MODELS.find(m => m.id === 'wan2.7-r2v')!;
+    const p = wan27.params;
+
+    it('wan2.7-r2v 已注册为 R2V 模型', () => {
+        expect(wan27.generationModes).toEqual(['r2v']);
+    });
+
+    it('支持 R2V 所需参数', () => {
+        expect(p.resolution).toBeDefined();
+        expect(p.seed).toBe(true);
+        expect(p.shotType).toBe(true);
+        expect(p.audio).toBe(true);
+        expect(p.promptExtend).toBeUndefined();
+        expect(p.negativePrompt).toBeUndefined();
     });
 });
 

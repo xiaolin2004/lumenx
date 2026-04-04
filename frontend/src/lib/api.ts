@@ -24,11 +24,20 @@ const getApiUrl = (): string => {
 };
 
 export const API_URL = getApiUrl();
+axios.defaults.withCredentials = true;
+
+const fetchWithCredentials = (input: RequestInfo | URL, init: RequestInit = {}) =>
+    fetch(input, {
+        ...init,
+        credentials: "include",
+    });
 
 export type ProviderMode = "dashscope" | "vendor";
 
 export interface EnvConfigPayload {
     DASHSCOPE_API_KEY?: string;
+    LUMENX_ENTRY_PASSWORD?: string;
+    LUMENX_ENTRY_PASSWORD_CONFIGURED?: boolean;
     LLM_PROVIDER?: string;
     LLM_MODEL?: string;
     OPENAI_API_KEY?: string;
@@ -67,9 +76,30 @@ export interface VideoTask {
     frame_id?: string;
     generation_mode?: string;
     reference_video_urls?: string[];
+    error?: string;
+}
+
+export interface EntryAuthStatus {
+    enabled: boolean;
+    authenticated: boolean;
 }
 
 export const api = {
+    getEntryAuthStatus: async (): Promise<EntryAuthStatus> => {
+        const res = await axios.get(`${API_URL}/config/auth/status`);
+        return res.data;
+    },
+
+    loginEntryAuth: async (password: string) => {
+        const res = await axios.post(`${API_URL}/config/auth/login`, { password });
+        return res.data;
+    },
+
+    logoutEntryAuth: async () => {
+        const res = await axios.post(`${API_URL}/config/auth/logout`);
+        return res.data;
+    },
+
     createProject: async (title: string, text: string, skipAnalysis: boolean = false) => {
         const res = await axios.post(`${API_URL}/projects`, { title, text }, {
             params: { skip_analysis: skipAnalysis }
@@ -163,7 +193,7 @@ export const api = {
     uploadFile: async (file: File) => {
         const formData = new FormData();
         formData.append("file", file);
-        const response = await fetch(`${API_URL}/upload`, {
+        const response = await fetchWithCredentials(`${API_URL}/upload`, {
             method: "POST",
             body: formData,
         });
@@ -193,7 +223,7 @@ export const api = {
             params.append("description", description);
         }
 
-        const response = await fetch(
+        const response = await fetchWithCredentials(
             `${API_URL}/projects/${scriptId}/assets/${assetType}/${assetId}/upload?${params.toString()}`,
             {
                 method: "POST",
@@ -317,6 +347,7 @@ export const api = {
         t2iModel?: string,
         i2iModel?: string,
         i2vModel?: string,
+        r2vModel?: string,
         characterAspectRatio?: string,
         sceneAspectRatio?: string,
         propAspectRatio?: string,
@@ -326,6 +357,7 @@ export const api = {
             t2i_model: t2iModel,
             i2i_model: i2iModel,
             i2v_model: i2vModel,
+            r2v_model: r2vModel,
             character_aspect_ratio: characterAspectRatio,
             scene_aspect_ratio: sceneAspectRatio,
             prop_aspect_ratio: propAspectRatio,
@@ -488,13 +520,13 @@ export const api = {
     },
 
     getVoices: async () => {
-        const response = await fetch(`${API_URL}/voices`);
+        const response = await fetchWithCredentials(`${API_URL}/voices`);
         if (!response.ok) throw new Error("Failed to fetch voices");
         return response.json();
     },
 
     bindVoice: async (scriptId: string, charId: string, voiceId: string, voiceName: string) => {
-        const response = await fetch(`${API_URL}/projects/${scriptId}/characters/${charId}/voice`, {
+        const response = await fetchWithCredentials(`${API_URL}/projects/${scriptId}/characters/${charId}/voice`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ voice_id: voiceId, voice_name: voiceName }),
@@ -504,7 +536,7 @@ export const api = {
     },
 
     generateAudio: async (scriptId: string) => {
-        const response = await fetch(`${API_URL}/projects/${scriptId}/generate_audio`, {
+        const response = await fetchWithCredentials(`${API_URL}/projects/${scriptId}/generate_audio`, {
             method: "POST",
         });
         if (!response.ok) throw new Error("Failed to generate audio");
@@ -512,7 +544,7 @@ export const api = {
     },
 
     generateLineAudio: async (scriptId: string, frameId: string, speed: number, pitch: number, volume: number = 50) => {
-        const response = await fetch(`${API_URL}/projects/${scriptId}/frames/${frameId}/audio`, {
+        const response = await fetchWithCredentials(`${API_URL}/projects/${scriptId}/frames/${frameId}/audio`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ speed, pitch, volume }),
@@ -522,7 +554,7 @@ export const api = {
     },
 
     updateVoiceParams: async (scriptId: string, charId: string, speed: number, pitch: number, volume: number) => {
-        const response = await fetch(`${API_URL}/projects/${scriptId}/characters/${charId}/voice_params`, {
+        const response = await fetchWithCredentials(`${API_URL}/projects/${scriptId}/characters/${charId}/voice_params`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ speed, pitch, volume }),
@@ -532,7 +564,7 @@ export const api = {
     },
 
     exportProject: async (scriptId: string, options: any) => {
-        const response = await fetch(`${API_URL}/projects/${scriptId}/export`, {
+        const response = await fetchWithCredentials(`${API_URL}/projects/${scriptId}/export`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(options),
@@ -568,7 +600,7 @@ export const api = {
     uploadFrameImage: async (scriptId: string, frameId: string, file: File) => {
         const formData = new FormData();
         formData.append("file", file);
-        const response = await fetch(
+        const response = await fetchWithCredentials(
             `${API_URL}/projects/${scriptId}/frames/${frameId}/upload_image`,
             { method: "POST", body: formData }
         );
@@ -646,6 +678,7 @@ export const api = {
         t2i_model?: string;
         i2i_model?: string;
         i2v_model?: string;
+        r2v_model?: string;
         character_aspect_ratio?: string;
         scene_aspect_ratio?: string;
         prop_aspect_ratio?: string;

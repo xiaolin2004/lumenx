@@ -56,14 +56,42 @@ export default function StoryboardComposer() {
 
         setIsAnalyzing(true);
         try {
-            const updatedProject = await api.analyzeToStoryboard(currentProject.id, text);
-            const frameCount = updatedProject.frames?.length || 0;
-            if (frameCount > 0) {
-                updateProject(currentProject.id, updatedProject);
-                alert(`成功生成 ${frameCount} 个分镜帧！`);
-            } else {
-                alert("AI 模型未生成有效分镜帧，请重新点击按钮再试一次。");
+            const response = await api.analyzeToStoryboard(currentProject.id, text);
+            const taskId = response?._task_id;
+
+            if (!taskId) {
+                const frameCount = response.frames?.length || 0;
+                if (frameCount > 0) {
+                    updateProject(currentProject.id, response);
+                    alert(`成功生成 ${frameCount} 个分镜帧！`);
+                } else {
+                    alert("AI 模型未生成有效分镜帧，请重新点击按钮再试一次。");
+                }
+                return;
             }
+
+            const pollInterval = setInterval(async () => {
+                try {
+                    const status = await api.getTaskStatus(taskId);
+
+                    if (status.status === "completed") {
+                        clearInterval(pollInterval);
+                        const updatedProject = await api.getProject(currentProject.id);
+                        const frameCount = updatedProject.frames?.length || 0;
+                        updateProject(currentProject.id, updatedProject);
+                        alert(frameCount > 0 ? `成功生成 ${frameCount} 个分镜帧！` : "AI 模型未生成有效分镜帧，请重新点击按钮再试一次。");
+                        setIsAnalyzing(false);
+                    } else if (status.status === "failed") {
+                        clearInterval(pollInterval);
+                        alert(`分镜生成失败：${status.error || "请稍后重试。"}`);
+                        setIsAnalyzing(false);
+                    }
+                } catch (pollError: any) {
+                    clearInterval(pollInterval);
+                    alert(`分镜任务轮询失败：${pollError?.message || "网络错误"}`);
+                    setIsAnalyzing(false);
+                }
+            }, 2000);
         } catch (error: any) {
             console.error("Analyze to storyboard failed:", error);
             const detail = extractErrorDetail(error, "");
@@ -72,7 +100,6 @@ export default function StoryboardComposer() {
             } else {
                 alert(`分镜生成失败：${detail || "请查看控制台了解详情。"}`);
             }
-        } finally {
             setIsAnalyzing(false);
         }
     };

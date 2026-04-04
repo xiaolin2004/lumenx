@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Settings, X, Image, Video, Layout, Check, User, Building, Box, Loader2 } from 'lucide-react';
-import { T2I_MODELS, I2I_MODELS, I2V_MODELS, ASPECT_RATIOS } from '@/store/projectStore';
+import { T2I_MODELS, I2I_MODELS, ASPECT_RATIOS, getVideoModelsForMode } from '@/store/projectStore';
 import { api } from '@/lib/api';
 
 interface SeriesModelSettingsModalProps {
@@ -14,9 +14,12 @@ interface SeriesModelSettingsModalProps {
 }
 
 export default function SeriesModelSettingsModal({ isOpen, onClose, seriesId, onSaved }: SeriesModelSettingsModalProps) {
+    const defaultI2vModels = getVideoModelsForMode('i2v');
+    const defaultR2vModels = getVideoModelsForMode('r2v');
     const [t2iModel, setT2iModel] = useState('wan2.5-t2i-preview');
     const [i2iModel, setI2iModel] = useState('wan2.5-i2i-preview');
     const [i2vModel, setI2vModel] = useState('wan2.5-i2v-preview');
+    const [r2vModel, setR2vModel] = useState('wan2.7-r2v');
     const [characterAspectRatio, setCharacterAspectRatio] = useState('9:16');
     const [sceneAspectRatio, setSceneAspectRatio] = useState('16:9');
     const [propAspectRatio, setPropAspectRatio] = useState('1:1');
@@ -35,6 +38,7 @@ export default function SeriesModelSettingsModal({ isOpen, onClose, seriesId, on
                         setT2iModel(data.t2i_model || 'wan2.5-t2i-preview');
                         setI2iModel(data.i2i_model || 'wan2.5-i2i-preview');
                         setI2vModel(data.i2v_model || 'wan2.5-i2v-preview');
+                        setR2vModel(data.r2v_model || 'wan2.7-r2v');
                         setCharacterAspectRatio(data.character_aspect_ratio || '9:16');
                         setSceneAspectRatio(data.scene_aspect_ratio || '16:9');
                         setPropAspectRatio(data.prop_aspect_ratio || '1:1');
@@ -56,6 +60,7 @@ export default function SeriesModelSettingsModal({ isOpen, onClose, seriesId, on
                 t2i_model: t2iModel,
                 i2i_model: i2iModel,
                 i2v_model: i2vModel,
+                r2v_model: r2vModel,
                 character_aspect_ratio: characterAspectRatio,
                 scene_aspect_ratio: sceneAspectRatio,
                 prop_aspect_ratio: propAspectRatio,
@@ -244,8 +249,8 @@ export default function SeriesModelSettingsModal({ isOpen, onClose, seriesId, on
 
                                     <div className="space-y-2">
                                         <label className="text-xs text-gray-400">Model</label>
-                                        <div className="grid grid-cols-2 gap-2">
-                                            {I2V_MODELS.map((model) => (
+                                    <div className="grid grid-cols-2 gap-2">
+                                        {defaultI2vModels.map((model) => (
                                                 <button
                                                     key={model.id}
                                                     onClick={() => setI2vModel(model.id)}
@@ -257,6 +262,30 @@ export default function SeriesModelSettingsModal({ isOpen, onClose, seriesId, on
                                                     {i2vModel === model.id && (
                                                         <div className="absolute top-2 right-2">
                                                             <Check size={14} className="text-purple-400" />
+                                                        </div>
+                                                    )}
+                                                    <span className="text-sm font-medium text-white">{model.name}</span>
+                                                    <span className="text-xs text-gray-500">{model.description}</span>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-2">
+                                        <label className="text-xs text-gray-400">R2V Model</label>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            {defaultR2vModels.map((model) => (
+                                                <button
+                                                    key={model.id}
+                                                    onClick={() => setR2vModel(model.id)}
+                                                    className={`relative flex flex-col items-start p-3 rounded-lg border transition-all text-left ${r2vModel === model.id
+                                                        ? 'border-fuchsia-500/50 bg-fuchsia-500/10'
+                                                        : 'border-white/10 hover:border-white/20 bg-white/5'
+                                                    }`}
+                                                >
+                                                    {r2vModel === model.id && (
+                                                        <div className="absolute top-2 right-2">
+                                                            <Check size={14} className="text-fuchsia-400" />
                                                         </div>
                                                     )}
                                                     <span className="text-sm font-medium text-white">{model.name}</span>

@@ -320,7 +320,7 @@ class WanxModel(VideoGenModel):
                 # R2V generation
                 ref_video_urls = kwargs.get('ref_video_urls', [])
                 if not ref_video_urls:
-                    raise ValueError("ref_video_urls is required for wan2.6-r2v")
+                    raise ValueError(f"ref_video_urls is required for {final_model_name}")
 
                 resolver_model = self._resolver_model_for_media(final_model_name)
                 backend = self._resolve_provider_backend_for_model(resolver_model)
@@ -337,6 +337,29 @@ class WanxModel(VideoGenModel):
                 ref_video_urls = [item.value for item in resolved_ref_urls]
                 for resolved_item in resolved_ref_urls:
                     self._merge_media_headers(extra_media_headers, resolved_item.headers)
+
+                first_frame_url = None
+                first_frame_ref = img_path or img_url
+                if first_frame_ref and final_model_name == "wan2.7-r2v":
+                    resolved_first_frame = resolve_media_input(
+                        first_frame_ref,
+                        model_name=resolver_model,
+                        modality="image",
+                        backend=backend,
+                        uploader=uploader,
+                        dashscope_temp_url_resolver=temp_url_resolver,
+                    )
+                    if resolved_first_frame.value.startswith("data:image/"):
+                        resolved_first_frame = resolve_media_input(
+                            first_frame_ref,
+                            model_name=resolver_model,
+                            modality="reference_video",
+                            backend=backend,
+                            uploader=uploader,
+                            dashscope_temp_url_resolver=temp_url_resolver,
+                        )
+                    first_frame_url = resolved_first_frame.value
+                    self._merge_media_headers(extra_media_headers, resolved_first_frame.headers)
                 
                 shot_type = kwargs.get('shot_type', 'multi') # Default to multi for R2V as per PRD
                 
@@ -345,10 +368,15 @@ class WanxModel(VideoGenModel):
                     ref_video_urls=ref_video_urls,
                     model_name=final_model_name,
                     size=size, # R2V uses size (e.g. 1280*720)
+                    resolution=resolution,
                     duration=duration,
                     audio=kwargs.get('audio', True), # Default to True for R2V
                     shot_type=shot_type,
                     seed=seed,
+                    prompt_extend=prompt_extend,
+                    negative_prompt=negative_prompt,
+                    watermark=watermark,
+                    first_frame_url=first_frame_url,
                     extra_headers=extra_media_headers,
                 )
             else:
@@ -500,9 +528,11 @@ class WanxModel(VideoGenModel):
         raise RuntimeError(f"{model_name} task timed out after {max_wait_time}s")
 
     def _generate_wan_r2v_http(self, prompt: str, ref_video_urls: list, model_name: str = "wan2.6-r2v",
-                                  size: str = "1280*720", 
+                                  size: str = "1280*720", resolution: str = "720P",
                                   duration: int = 5, audio: bool = True,
                                   shot_type: str = "multi", seed: int = None,
+                                  prompt_extend: bool = True, negative_prompt: str = None,
+                                  watermark: bool = False, first_frame_url: str = None,
                                   extra_headers: Optional[Mapping[str, str]] = None) -> str:
         """Generate video using Wan R2V via HTTP API (asynchronous with polling)."""
         base = get_provider_base_url("DASHSCOPE")
@@ -516,19 +546,48 @@ class WanxModel(VideoGenModel):
         if extra_headers:
             headers.update(dict(extra_headers))
         
-        payload = {
-            "model": model_name,
-            "input": {
-                "prompt": prompt,
-                "reference_video_urls": ref_video_urls
-            },
-            "parameters": {
-                "size": size,
-                "duration": duration,
-                "audio": audio,
-                "shot_type": shot_type
+        if model_name == "wan2.7-r2v":
+            media = [
+                {"type": "reference_video", "url": url}
+                for url in ref_video_urls
+            ]
+            if first_frame_url:
+                media.append({"type": "first_frame", "url": first_frame_url})
+
+            payload = {
+                "model": model_name,
+                "input": {
+                    "prompt": prompt,
+                    "media": media,
+                },
+                "parameters": {
+                    "resolution": resolution,
+                    "duration": duration,
+                    "prompt_extend": prompt_extend,
+                    "watermark": watermark,
+                }
             }
-        }
+            if negative_prompt:
+                payload["input"]["negative_prompt"] = negative_prompt
+        else:
+            payload = {
+                "model": model_name,
+                "input": {
+                    "prompt": prompt,
+                    "reference_urls": ref_video_urls
+                },
+                "parameters": {
+                    "size": size,
+                    "duration": duration,
+                    "shot_type": shot_type
+                }
+            }
+            if audio is not None:
+                payload["parameters"]["audio"] = audio
+            if watermark:
+                payload["parameters"]["watermark"] = watermark
+            if negative_prompt:
+                payload["input"]["negative_prompt"] = negative_prompt
         
         if seed:
             payload["parameters"]["seed"] = seed

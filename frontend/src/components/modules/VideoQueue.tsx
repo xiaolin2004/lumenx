@@ -220,7 +220,7 @@ function TaskCard({ task, onRemix }: { task: VideoTask; onRemix: (t: VideoTask) 
                         <AlertCircle size={16} />
                         <span className="text-sm font-medium">生成失败</span>
                     </div>
-                    <p className="text-xs text-gray-500 mb-3">未知错误，请重试</p>
+                    <p className="text-xs text-gray-500 mb-3 break-words">{task.error || "未知错误，请重试"}</p>
                     <button
                         onClick={() => onRemix(task)}
                         className="w-full py-1.5 bg-white/5 hover:bg-white/10 rounded text-xs text-gray-300 transition-colors"

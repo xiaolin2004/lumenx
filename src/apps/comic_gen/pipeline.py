@@ -15,7 +15,7 @@ from .storyboard import StoryboardGenerator
 from .video import VideoGenerator
 from .audio import AudioGenerator
 from .export import ExportManager
-from ...utils import get_logger
+from ...utils import get_logger, log_exception_with_context
 from ...utils.oss_utils import is_object_key
 from ...utils.provider_registry import resolve_provider_backend
 from ...utils.system_check import get_ffmpeg_path, get_ffmpeg_install_instructions
@@ -67,6 +67,7 @@ class ComicGenPipeline:
         # Format: { task_id: { status: str, progress: int, error: str, script_id: str, asset_id: str, created_at: float } }
         self.asset_generation_tasks: Dict[str, Dict[str, Any]] = {}
         self.video_generation_tasks: Dict[str, Dict[str, Any]] = {}
+        self.storyboard_generation_tasks: Dict[str, Dict[str, Any]] = {}
         # Temporary cache for file import previews (import_id -> text)
         self._import_cache: Dict[str, str] = {}
         # Cached model instances for Kling/Vidu (lazily initialized)
@@ -445,6 +446,9 @@ class ComicGenPipeline:
         if not task:
             # Then check video tasks
             task = self.video_generation_tasks.get(task_id)
+        if not task:
+            # Then check storyboard tasks
+            task = self.storyboard_generation_tasks.get(task_id)
             
         if not task:
             return None
@@ -459,6 +463,57 @@ class ComicGenPipeline:
             "script_id": task.get("script_id"),
             "created_at": task.get("created_at")
         }
+
+    def create_storyboard_analysis_task(self, script_id: str, text: str) -> Tuple[Script, str]:
+        """Creates an async storyboard analysis task."""
+        script = self.scripts.get(script_id)
+        if not script:
+            raise ValueError("Script not found")
+
+        task_id = str(uuid.uuid4())
+        self.storyboard_generation_tasks[task_id] = {
+            "status": "pending",
+            "progress": 0,
+            "error": None,
+            "script_id": script_id,
+            "asset_id": None,
+            "asset_type": "storyboard",
+            "created_at": time.time(),
+            "text": text,
+        }
+        return script, task_id
+
+    def process_storyboard_analysis_task(self, task_id: str):
+        """Processes storyboard analysis in the background."""
+        task = self.storyboard_generation_tasks.get(task_id)
+        if not task:
+            logger.error(f"Storyboard task {task_id} not found")
+            return
+
+        task["status"] = "processing"
+        task["progress"] = 10
+
+        try:
+            self.analyze_text_to_frames(task["script_id"], task.get("text", ""))
+            task["status"] = "completed"
+            task["progress"] = 100
+            logger.info(
+                "Storyboard task completed successfully | task_id=%r script_id=%r text_length=%r",
+                task_id,
+                task["script_id"],
+                len(task.get("text", "")),
+            )
+        except Exception as e:
+            task["status"] = "failed"
+            task["error"] = str(e)
+            log_exception_with_context(
+                logger,
+                "Storyboard task failed",
+                task_id=task_id,
+                script_id=task.get("script_id"),
+                text_length=len(task.get("text", "")),
+                error=str(e),
+            )
 
     def create_motion_ref_task(self, script_id: str, asset_id: str, asset_type: str, 
                                 prompt: Optional[str] = None, audio_url: Optional[str] = None, 
@@ -511,11 +566,30 @@ class ComicGenPipeline:
             )
             task["status"] = "completed"
             task["progress"] = 100
-            logger.info(f"Video task {task_id} completed successfully")
+            logger.info(
+                "Motion ref task completed successfully | task_id=%r script_id=%r asset_id=%r asset_type=%r",
+                task_id,
+                script_id,
+                task.get("asset_id"),
+                task.get("asset_type"),
+            )
         except Exception as e:
             task["status"] = "failed"
             task["error"] = str(e)
-            logger.error(f"Video task {task_id} failed: {e}")
+            params = task.get("params", {})
+            log_exception_with_context(
+                logger,
+                "Motion ref task failed",
+                task_id=task_id,
+                script_id=script_id,
+                asset_id=task.get("asset_id"),
+                asset_type=task.get("asset_type"),
+                prompt=params.get("prompt"),
+                audio_url=params.get("audio_url"),
+                duration=params.get("duration"),
+                batch_size=params.get("batch_size"),
+                error=str(e),
+            )
 
     def sync_descriptions_from_script_entities(self, script_id: str) -> Script:
         """
@@ -866,7 +940,11 @@ class ComicGenPipeline:
         if not script:
             raise ValueError("Script not found")
         
-        logger.info(f"Analyzing text to frames for project {script_id}")
+        logger.info(
+            "Analyzing text to frames | script_id=%r text_length=%r",
+            script_id,
+            len(text or ""),
+        )
 
         # Resolve assets (merge Series + Episode if applicable)
         resolved = self.resolve_episode_assets(script)
@@ -1402,9 +1480,11 @@ class ComicGenPipeline:
         
         task_id = str(uuid.uuid4())
         
-        # If R2V mode is selected, use the R2V model
+        # Preserve the requested R2V model when supported; otherwise fall back safely.
         if generation_mode == "r2v":
-            model = "wan2.6-r2v"
+            normalized_model = (model or "").strip().lower()
+            if normalized_model not in {"wan2.6-r2v", "wan2.7-r2v"}:
+                model = "wan2.6-r2v"
         
         # Snapshot the input image to ensure consistency
         snapshot_url = image_url
@@ -1974,6 +2054,19 @@ class ComicGenPipeline:
             # Update status to processing
             task.status = "processing"
             self._save_data()
+            logger.info(
+                "Processing video task | task_id=%r script_id=%r frame_id=%r asset_id=%r model=%r generation_mode=%r duration=%r resolution=%r has_audio_url=%r ref_video_count=%r",
+                task_id,
+                script_id,
+                task.frame_id,
+                task.asset_id,
+                task.model,
+                task.generation_mode,
+                task.duration,
+                task.resolution,
+                bool(task.audio_url),
+                len(task.reference_video_urls or []),
+            )
             
             # Download image to temp file
             img_path = None
@@ -2098,16 +2191,43 @@ class ComicGenPipeline:
             
             task.video_url = os.path.relpath(output_path, "output")
             task.status = "completed"
+            task.error = None
+            logger.info(
+                "Video task completed | task_id=%r script_id=%r frame_id=%r asset_id=%r model=%r output=%r",
+                task_id,
+                script_id,
+                task.frame_id,
+                task.asset_id,
+                task.model,
+                task.video_url,
+            )
             
             # Sync with asset if this is an asset video
             if task.asset_id:
                 self._sync_asset_video_task(script, task)
             
         except Exception as e:
-            import traceback
-            logger.exception("Failed to process video task")
-            logger.error(f"Video generation failed: {e}")
             task.status = "failed"
+            task.error = str(e)
+            log_exception_with_context(
+                logger,
+                "Failed to process video task",
+                task_id=task_id,
+                script_id=script_id,
+                frame_id=task.frame_id,
+                asset_id=task.asset_id,
+                model=task.model,
+                generation_mode=task.generation_mode,
+                duration=task.duration,
+                resolution=task.resolution,
+                prompt=task.prompt,
+                negative_prompt=task.negative_prompt,
+                image_url=task.image_url,
+                audio_url=task.audio_url,
+                generate_audio=task.generate_audio,
+                ref_video_count=len(task.reference_video_urls or []),
+                error=str(e),
+            )
             if task.asset_id:
                 self._sync_asset_video_task(script, task)
             
@@ -2519,7 +2639,7 @@ class ComicGenPipeline:
         self._save_data()
         return script
 
-    def update_model_settings(self, script_id: str, t2i_model: str = None, i2i_model: str = None, i2v_model: str = None, character_aspect_ratio: str = None, scene_aspect_ratio: str = None, prop_aspect_ratio: str = None, storyboard_aspect_ratio: str = None) -> Script:
+    def update_model_settings(self, script_id: str, t2i_model: str = None, i2i_model: str = None, i2v_model: str = None, r2v_model: str = None, character_aspect_ratio: str = None, scene_aspect_ratio: str = None, prop_aspect_ratio: str = None, storyboard_aspect_ratio: str = None) -> Script:
         """Updates the model settings for a script."""
         script = self.scripts.get(script_id)
         if not script:
@@ -2531,6 +2651,8 @@ class ComicGenPipeline:
             script.model_settings.i2i_model = i2i_model
         if i2v_model:
             script.model_settings.i2v_model = i2v_model
+        if r2v_model:
+            script.model_settings.r2v_model = r2v_model
         if character_aspect_ratio:
             script.model_settings.character_aspect_ratio = character_aspect_ratio
         if scene_aspect_ratio:
@@ -2645,6 +2767,45 @@ class ComicGenPipeline:
 
     def list_series(self) -> List[Series]:
         return list(self.series_store.values())
+
+    def _compose_series_with_episode_assets(self, series: Series) -> Series:
+        """Build a read-only Series view that includes assets from its episodes."""
+        merged_series = series.model_copy(deep=True)
+
+        character_ids = {asset.id for asset in merged_series.characters}
+        scene_ids = {asset.id for asset in merged_series.scenes}
+        prop_ids = {asset.id for asset in merged_series.props}
+
+        for episode_id in series.episode_ids:
+            episode = self.scripts.get(episode_id)
+            if not episode:
+                continue
+
+            for character in episode.characters:
+                if character.id not in character_ids:
+                    merged_series.characters.append(character.model_copy(deep=True))
+                    character_ids.add(character.id)
+
+            for scene in episode.scenes:
+                if scene.id not in scene_ids:
+                    merged_series.scenes.append(scene.model_copy(deep=True))
+                    scene_ids.add(scene.id)
+
+            for prop in episode.props:
+                if prop.id not in prop_ids:
+                    merged_series.props.append(prop.model_copy(deep=True))
+                    prop_ids.add(prop.id)
+
+        return merged_series
+
+    def get_series_with_episode_assets(self, series_id: str) -> Optional[Series]:
+        series = self.series_store.get(series_id)
+        if not series:
+            return None
+        return self._compose_series_with_episode_assets(series)
+
+    def list_series_with_episode_assets(self) -> List[Series]:
+        return [self._compose_series_with_episode_assets(series) for series in self.series_store.values()]
 
     def update_series(self, series_id: str, updates: Dict[str, Any]) -> Series:
         """Update Series fields (title, description, etc.)."""

@@ -1,6 +1,8 @@
 import logging
-import sys
 import os
+import sys
+from logging.handlers import RotatingFileHandler
+from typing import Any
 
 # User data directory for logs, config, and data
 def get_user_data_dir() -> str:
@@ -13,6 +15,30 @@ def get_log_dir() -> str:
     log_dir = os.path.join(get_user_data_dir(), "logs")
     os.makedirs(log_dir, exist_ok=True)
     return log_dir
+
+
+def format_log_context(**context: Any) -> str:
+    """Formats key=value pairs for compact log context."""
+    parts = []
+    for key, value in context.items():
+        if value is None:
+            continue
+        if isinstance(value, str):
+            normalized = value.replace("\n", "\\n")
+            if len(normalized) > 300:
+                normalized = normalized[:297] + "..."
+            value = normalized
+        parts.append(f"{key}={value!r}")
+    return " ".join(parts)
+
+
+def log_exception_with_context(logger: logging.Logger, message: str, **context: Any) -> None:
+    """Logs an exception with traceback and structured context."""
+    suffix = format_log_context(**context)
+    if suffix:
+        logger.exception("%s | %s", message, suffix)
+    else:
+        logger.exception(message)
 
 
 def setup_logging(level=logging.INFO, log_file=None):
@@ -39,11 +65,37 @@ def setup_logging(level=logging.INFO, log_file=None):
             if log_dir:
                 os.makedirs(log_dir, exist_ok=True)
 
-            file_handler = logging.FileHandler(log_file, mode='a', encoding='utf-8')
+            file_handler = RotatingFileHandler(
+                log_file,
+                mode='a',
+                encoding='utf-8',
+                maxBytes=10 * 1024 * 1024,
+                backupCount=5,
+            )
             file_handler.setFormatter(
-                logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+                logging.Formatter(
+                    '%(asctime)s - %(process)d - %(threadName)s - %(name)s - '
+                    '%(levelname)s - %(filename)s:%(lineno)d - %(message)s'
+                )
             )
             handlers.append(file_handler)
+
+            error_log_file = os.path.join(log_dir, "error.log")
+            error_handler = RotatingFileHandler(
+                error_log_file,
+                mode='a',
+                encoding='utf-8',
+                maxBytes=10 * 1024 * 1024,
+                backupCount=5,
+            )
+            error_handler.setLevel(logging.ERROR)
+            error_handler.setFormatter(
+                logging.Formatter(
+                    '%(asctime)s - %(process)d - %(threadName)s - %(name)s - '
+                    '%(levelname)s - %(filename)s:%(lineno)d - %(message)s'
+                )
+            )
+            handlers.append(error_handler)
         except OSError as exc:
             # In restricted environments (tests/sandbox), fallback to console-only logging.
             print(
@@ -55,18 +107,24 @@ def setup_logging(level=logging.INFO, log_file=None):
     # 添加控制台处理器（会被重定向到日志文件）
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(
-        logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        logging.Formatter(
+            '%(asctime)s - %(process)d - %(threadName)s - %(name)s - '
+            '%(levelname)s - %(filename)s:%(lineno)d - %(message)s'
+        )
     )
     handlers.append(console_handler)
     
     logging.basicConfig(
         level=level,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=handlers
+        format=(
+            '%(asctime)s - %(process)d - %(threadName)s - %(name)s - '
+            '%(levelname)s - %(filename)s:%(lineno)d - %(message)s'
+        ),
+        handlers=handlers,
+        force=True,
     )
 
 
 def get_logger(name):
     """Returns a logger with the specified name."""
     return logging.getLogger(name)
-

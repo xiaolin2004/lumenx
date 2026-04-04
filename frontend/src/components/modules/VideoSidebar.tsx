@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Settings2, List, RefreshCw, ChevronDown, ChevronUp, Mic, Music, VolumeX, Wand2 } from "lucide-react";
 import VideoQueue from "./VideoQueue";
 import { VideoTask, api } from "@/lib/api";
-import { I2V_MODELS, DurationConfig, ModelParamSupport, VideoParams, GRID_COLS_CLASS } from "@/store/projectStore";
+import { I2V_MODELS, DurationConfig, ModelParamSupport, VideoParams, GRID_COLS_CLASS, getVideoModelsForMode } from "@/store/projectStore";
 
 interface VideoSidebarProps {
     tasks: VideoTask[];
@@ -19,6 +19,7 @@ export default function VideoSidebar({ tasks, onRemix, params, setParams }: Vide
     const [isUploadingAudio, setIsUploadingAudio] = useState(false);
     const audioInputRef = useRef<HTMLInputElement>(null);
     const [showNegative, setShowNegative] = useState(false);
+    const availableModels = getVideoModelsForMode(params.generationMode === "r2v" ? "r2v" : "i2v");
 
     const currentModelConfig = I2V_MODELS.find(m => m.id === params.model);
     const modelParams: ModelParamSupport = currentModelConfig?.params ?? {};
@@ -152,30 +153,25 @@ export default function VideoSidebar({ tasks, onRemix, params, setParams }: Vide
                                     Basic Settings
                                 </h3>
 
-                                {/* Model Selection - R2V mode: only Wan 2.6 is selectable */}
+                                {/* Model Selection */}
                                 <div>
                                     <label className="block text-xs text-gray-400 mb-2">
                                         Model (模型)
                                         {params.generationMode === "r2v" && (
-                                            <span className="text-purple-400 ml-2">(R2V仅支持 Wan 2.6)</span>
+                                            <span className="text-purple-400 ml-2">(R2V 支持 Wan 2.6 / Wan 2.7)</span>
                                         )}
                                     </label>
                                     <div className="space-y-2">
-                                        {I2V_MODELS.map((model) => {
-                                            const isR2VMode = params.generationMode === "r2v";
-                                            const isWan26 = model.id === "wan2.6-i2v";
-                                            const isDisabled = isR2VMode && !isWan26;
-                                            const isSelected = isR2VMode ? isWan26 : params.model === model.id;
-
+                                        {availableModels.map((model) => {
+                                            const isSelected = params.model === model.id;
                                             return (
                                                 <button
                                                     key={model.id}
-                                                    onClick={() => !isDisabled && updateParam("model", model.id)}
-                                                    disabled={isDisabled}
+                                                    onClick={() => updateParam("model", model.id)}
                                                     className={`w-full flex items-center justify-between p-2.5 rounded-lg border transition-all text-left ${isSelected
                                                         ? 'border-primary/50 bg-primary/10'
                                                         : 'border-white/10 hover:border-white/20 bg-white/5'
-                                                        } ${isDisabled ? 'opacity-40 cursor-not-allowed' : ''}`}
+                                                        }`}
                                                 >
                                                     <div>
                                                         <span className="text-xs font-medium text-white">{model.name}</span>

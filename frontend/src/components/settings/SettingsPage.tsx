@@ -3,11 +3,14 @@
 import { useState, useEffect } from "react";
 import { Save, Loader2, Key, ChevronDown, ChevronRight, Settings, MessageSquareCode } from "lucide-react";
 import { api, type EnvConfigPayload, type ProviderMode } from "@/lib/api";
-import { T2I_MODELS, I2I_MODELS, I2V_MODELS, ASPECT_RATIOS } from "@/store/projectStore";
+import { T2I_MODELS, I2I_MODELS, ASPECT_RATIOS, getVideoModelsForMode } from "@/store/projectStore";
 import { Image, Video, Layout, Check, User, Building, Box } from "lucide-react";
+import { extractErrorDetail } from "@/lib/utils";
 
 type EnvConfig = EnvConfigPayload & {
   DASHSCOPE_API_KEY: string;
+  LUMENX_ENTRY_PASSWORD: string;
+  LUMENX_ENTRY_PASSWORD_CONFIGURED: boolean;
   LLM_PROVIDER: string;
   LLM_MODEL: string;
   OPENAI_API_KEY: string;
@@ -34,6 +37,8 @@ const ENDPOINT_PROVIDERS = [
 
 const DEFAULT_CONFIG: EnvConfig = {
   DASHSCOPE_API_KEY: "",
+  LUMENX_ENTRY_PASSWORD: "",
+  LUMENX_ENTRY_PASSWORD_CONFIGURED: false,
   LLM_PROVIDER: "dashscope",
   LLM_MODEL: "",
   OPENAI_API_KEY: "",
@@ -56,6 +61,9 @@ const normalizeProviderMode = (mode?: string): ProviderMode => (mode === "vendor
 
 const normalizeLlmProvider = (p?: string): string => (p === "openai" ? "openai" : "dashscope");
 
+const DEFAULT_I2V_MODELS = getVideoModelsForMode("i2v");
+const DEFAULT_R2V_MODELS = getVideoModelsForMode("r2v");
+
 const normalizeEnvConfig = (existing: EnvConfig, data?: EnvConfigPayload): EnvConfig => ({
   ...existing,
   ...data,
@@ -64,6 +72,8 @@ const normalizeEnvConfig = (existing: EnvConfig, data?: EnvConfigPayload): EnvCo
   VIDU_PROVIDER_MODE: normalizeProviderMode(data?.VIDU_PROVIDER_MODE ?? existing.VIDU_PROVIDER_MODE),
   PIXVERSE_PROVIDER_MODE: normalizeProviderMode(data?.PIXVERSE_PROVIDER_MODE ?? existing.PIXVERSE_PROVIDER_MODE),
   endpoint_overrides: data?.endpoint_overrides ?? existing.endpoint_overrides ?? {},
+  LUMENX_ENTRY_PASSWORD: "",
+  LUMENX_ENTRY_PASSWORD_CONFIGURED: Boolean(data?.LUMENX_ENTRY_PASSWORD_CONFIGURED ?? existing.LUMENX_ENTRY_PASSWORD_CONFIGURED),
 });
 
 const getValidationErrors = (env: EnvConfig): string[] => {
@@ -94,6 +104,7 @@ interface DefaultModelSettings {
   t2i_model: string;
   i2i_model: string;
   i2v_model: string;
+  r2v_model: string;
   character_aspect_ratio: string;
   scene_aspect_ratio: string;
   prop_aspect_ratio: string;
@@ -105,6 +116,17 @@ interface DefaultPromptConfig {
   video_polish: string;
   r2v_polish: string;
 }
+
+const DEFAULT_MODEL_SETTINGS: DefaultModelSettings = {
+  t2i_model: "wan2.5-t2i-preview",
+  i2i_model: "wan2.5-i2i-preview",
+  i2v_model: "wan2.5-i2v-preview",
+  r2v_model: "wan2.7-r2v",
+  character_aspect_ratio: "9:16",
+  scene_aspect_ratio: "16:9",
+  prop_aspect_ratio: "1:1",
+  storyboard_aspect_ratio: "16:9",
+};
 
 function loadFromLS<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
@@ -126,15 +148,7 @@ export default function SettingsPage() {
 
   // ── Default Model Settings ──
   const [modelSettings, setModelSettings] = useState<DefaultModelSettings>(() =>
-    loadFromLS(LS_KEY_MODEL, {
-      t2i_model: "wan2.5-t2i-preview",
-      i2i_model: "wan2.5-i2i-preview",
-      i2v_model: "wan2.5-i2v-preview",
-      character_aspect_ratio: "9:16",
-      scene_aspect_ratio: "16:9",
-      prop_aspect_ratio: "1:1",
-      storyboard_aspect_ratio: "16:9",
-    })
+    ({ ...DEFAULT_MODEL_SETTINGS, ...loadFromLS(LS_KEY_MODEL, DEFAULT_MODEL_SETTINGS) })
   );
 
   // ── Default Prompt Config ──
@@ -152,8 +166,13 @@ export default function SettingsPage() {
     try {
       const data = await api.getEnvConfig();
       setConfig((prev) => normalizeEnvConfig(prev, data));
-    } catch {
-      setLoadError("Failed to load configuration. Is the backend running?");
+    } catch (error) {
+      const status = (error as any)?.response?.status;
+      if (status === 401) {
+        setLoadError("需要先完成入口密码登录，才能查看环境配置。");
+      } else {
+        setLoadError(extractErrorDetail(error, "Failed to load configuration. Is the backend running?"));
+      }
     } finally {
       setLoading(false);
     }
@@ -168,10 +187,15 @@ export default function SettingsPage() {
 
     setSaving(true);
     try {
-      await api.saveEnvConfig(config);
+      const payload: EnvConfigPayload = { ...config };
+      if (!config.LUMENX_ENTRY_PASSWORD.trim()) {
+        delete payload.LUMENX_ENTRY_PASSWORD;
+      }
+      delete payload.LUMENX_ENTRY_PASSWORD_CONFIGURED;
+      await api.saveEnvConfig(payload);
       alert("Configuration saved successfully!");
-    } catch {
-      alert("Failed to save configuration.");
+    } catch (error) {
+      alert(extractErrorDetail(error, "Failed to save configuration."));
     } finally {
       setSaving(false);
     }
@@ -236,6 +260,30 @@ export default function SettingsPage() {
                 <span className="text-gray-600 font-normal text-xs">e.g. sk-xxx</span>
               </label>
               <input type="password" value={config.DASHSCOPE_API_KEY} onChange={(e) => handleChange("DASHSCOPE_API_KEY", e.target.value)} placeholder="Required for DashScope-first model routing" className={inputClass} />
+            </div>
+
+            <div className="pt-4 border-t border-white/10">
+              <h3 className="text-sm font-bold text-white mb-4">访问鉴权</h3>
+              <div className="bg-white/5 border border-white/10 rounded-lg p-4 space-y-3">
+                <div>
+                  <label className="flex items-center justify-between text-sm font-medium text-gray-300 mb-2">
+                    <span>入口密码</span>
+                    <span className="text-gray-600 font-normal text-xs">
+                      {config.LUMENX_ENTRY_PASSWORD_CONFIGURED ? "已配置，留空表示保持不变" : "留空表示关闭"}
+                    </span>
+                  </label>
+                  <input
+                    type="password"
+                    value={config.LUMENX_ENTRY_PASSWORD}
+                    onChange={(e) => handleChange("LUMENX_ENTRY_PASSWORD", e.target.value)}
+                    placeholder={config.LUMENX_ENTRY_PASSWORD_CONFIGURED ? "输入新密码以覆盖当前配置" : "为站点设置访问密码"}
+                    className={inputClass}
+                  />
+                </div>
+                <p className="text-xs text-gray-500">
+                  这层密码由后端中间件强制执行，前端仅负责登录交互；未输入新值时不会回传或覆盖已有密码。
+                </p>
+              </div>
             </div>
 
             <div className="pt-4 border-t border-white/10">
@@ -483,13 +531,28 @@ export default function SettingsPage() {
               <span>Motion (Image-to-Video)</span>
             </div>
             <div className="mt-3 grid grid-cols-2 gap-2">
-              {I2V_MODELS.map((model) => (
+              {DEFAULT_I2V_MODELS.map((model) => (
                 <button key={model.id} onClick={() => setModelSettings((s) => ({ ...s, i2v_model: model.id }))} className={`relative flex flex-col items-start p-3 rounded-lg border transition-all text-left ${modelSettings.i2v_model === model.id ? "border-purple-500/50 bg-purple-500/10" : "border-white/10 hover:border-white/20 bg-white/5"}`}>
                   {modelSettings.i2v_model === model.id && <div className="absolute top-2 right-2"><Check size={14} className="text-purple-400" /></div>}
                   <span className="text-sm font-medium text-white">{model.name}</span>
                   <span className="text-xs text-gray-500">{model.description}</span>
                 </button>
               ))}
+            </div>
+            <div className="mt-3">
+              <div className="flex items-center gap-2 text-sm font-bold text-white">
+                <Video size={16} className="text-fuchsia-400" />
+                <span>Motion (Reference-to-Video)</span>
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                {DEFAULT_R2V_MODELS.map((model) => (
+                  <button key={model.id} onClick={() => setModelSettings((s) => ({ ...s, r2v_model: model.id }))} className={`relative flex flex-col items-start p-3 rounded-lg border transition-all text-left ${modelSettings.r2v_model === model.id ? "border-fuchsia-500/50 bg-fuchsia-500/10" : "border-white/10 hover:border-white/20 bg-white/5"}`}>
+                    {modelSettings.r2v_model === model.id && <div className="absolute top-2 right-2"><Check size={14} className="text-fuchsia-400" /></div>}
+                    <span className="text-sm font-medium text-white">{model.name}</span>
+                    <span className="text-xs text-gray-500">{model.description}</span>
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         </div>

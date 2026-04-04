@@ -20,7 +20,9 @@ interface EpisodePreview {
 
 interface PreviewResult {
     episodes: EpisodePreview[];
-    text: string;
+    import_id?: string;
+    text?: string;
+    text_length?: number;
 }
 
 type Step = 1 | 2 | 3;
@@ -39,6 +41,7 @@ export default function ImportFileDialog({ isOpen, onClose, onSuccess }: ImportF
 
     // Step 2 state
     const [previewResult, setPreviewResult] = useState<PreviewResult | null>(null);
+    const [sourceText, setSourceText] = useState("");
     const [isCreating, setIsCreating] = useState(false);
 
     // Step 3 state
@@ -58,6 +61,7 @@ export default function ImportFileDialog({ isOpen, onClose, onSuccess }: ImportF
         setSuggestedEpisodes(3);
         setIsAnalyzing(false);
         setPreviewResult(null);
+        setSourceText("");
         setIsCreating(false);
         setCreatedResult(null);
         setError(null);
@@ -111,6 +115,8 @@ export default function ImportFileDialog({ isOpen, onClose, onSuccess }: ImportF
         setIsAnalyzing(true);
         setError(null);
         try {
+            const rawText = await file.text();
+            setSourceText(rawText);
             const result = await api.importFilePreview(file, suggestedEpisodes);
             setPreviewResult(result);
             setStep(2);
@@ -131,7 +137,8 @@ export default function ImportFileDialog({ isOpen, onClose, onSuccess }: ImportF
             const result = await api.importFileConfirm({
                 title: seriesTitle.trim(),
                 description: description.trim() || undefined,
-                text: previewResult.text,
+                import_id: previewResult.import_id,
+                text: previewResult.text || sourceText,
                 episodes: previewResult.episodes,
             });
             setCreatedResult({

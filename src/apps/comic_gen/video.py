@@ -2,7 +2,7 @@ import os
 from typing import Dict, Any
 from .models import StoryboardFrame, GenerationStatus
 from ...models.wanx import WanxModel
-from ...utils import get_logger
+from ...utils import get_logger, log_exception_with_context
 
 logger = get_logger(__name__)
 
@@ -66,7 +66,15 @@ class VideoGenerator:
             return {"video_url": video_url}
             
         except Exception as e:
-            logger.error(f"Failed to generate I2V motion reference: {e}")
+            log_exception_with_context(
+                logger,
+                "Failed to generate I2V motion reference",
+                prompt=prompt,
+                duration=duration,
+                image_url=image_url,
+                audio_url=audio_url,
+                error=str(e),
+            )
             raise
 
     def generate_clip(self, frame: StoryboardFrame) -> StoryboardFrame:
@@ -144,7 +152,15 @@ class VideoGenerator:
                 logger.error(f"Failed to upload video for frame {frame.id} to OSS: {e}")
                 # Continue even if OSS upload fails
         except Exception as e:
-            logger.error(f"Failed to generate video for frame {frame.id}: {e}")
+            log_exception_with_context(
+                logger,
+                "Failed to generate video clip",
+                frame_id=frame.id,
+                prompt=prompt,
+                image_url=frame.image_url,
+                resolved_img_path=img_path,
+                error=str(e),
+            )
             frame.status = GenerationStatus.FAILED
             
         return frame

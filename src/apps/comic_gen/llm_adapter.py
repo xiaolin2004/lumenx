@@ -15,7 +15,9 @@ Configuration via environment variables:
 import os
 import logging
 from typing import Dict, List, Optional, Any
+import requests
 
+from ...utils import log_exception_with_context
 from ...utils.endpoints import get_provider_base_url
 
 logger = logging.getLogger(__name__)
@@ -58,6 +60,64 @@ class LLMAdapter:
                 )
         return self._client
 
+    def _chat_via_dashscope_http(
+        self,
+        messages: List[Dict[str, str]],
+        model: str,
+        response_format: Optional[Dict[str, str]] = None,
+    ) -> str:
+        api_key = os.getenv("DASHSCOPE_API_KEY")
+        if not api_key:
+            raise RuntimeError("DashScope API key not configured")
+
+        payload: Dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+        }
+        if response_format:
+            payload["response_format"] = response_format
+
+        logger.info(
+            "Calling DashScope chat completion | model=%r message_count=%r response_format=%r",
+            model,
+            len(messages),
+            response_format,
+        )
+
+        url = f"{get_provider_base_url('DASHSCOPE')}/compatible-mode/v1/chat/completions"
+        try:
+            response = requests.post(
+                url,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+                timeout=120,
+            )
+        except Exception as exc:
+            log_exception_with_context(
+                logger,
+                "DashScope request failed",
+                provider=self.provider,
+                model=model,
+                url=url,
+                message_count=len(messages),
+                response_format=response_format,
+                error=str(exc),
+            )
+            raise
+        if response.status_code >= 400:
+            raise RuntimeError(
+                f"DashScope API error (HTTP {response.status_code}): {response.text}"
+            )
+
+        data = response.json()
+        try:
+            return data["choices"][0]["message"]["content"]
+        except Exception as exc:
+            raise RuntimeError(f"Unexpected DashScope response: {data}") from exc
+
     def _get_default_model(self) -> str:
         if self.provider == "openai":
             return os.getenv("OPENAI_MODEL", "gpt-4o")
@@ -83,8 +143,16 @@ class LLMAdapter:
         Raises:
             RuntimeError: If the API call fails.
         """
-        client = self._get_client()
         model = model or self._get_default_model()
+
+        if self.provider == "dashscope":
+            return self._chat_via_dashscope_http(
+                messages=messages,
+                model=model,
+                response_format=response_format,
+            )
+
+        client = self._get_client()
 
         kwargs: Dict[str, Any] = {
             "model": model,
@@ -97,5 +165,14 @@ class LLMAdapter:
             response = client.chat.completions.create(**kwargs)
             return response.choices[0].message.content
         except Exception as e:
+            log_exception_with_context(
+                logger,
+                "LLM chat completion failed",
+                provider=self.provider,
+                model=model,
+                response_format=response_format,
+                message_count=len(messages),
+                error=str(e),
+            )
             provider_label = "DashScope" if self.provider != "openai" else "OpenAI"
             raise RuntimeError(f"{provider_label} API error: {e}") from e

@@ -13,6 +13,14 @@ import uuid
 import logging
 import traceback
 from .pipeline import ComicGenPipeline
+from .entry_auth import (
+    clear_entry_auth_cookie,
+    is_entry_auth_enabled,
+    is_request_authenticated,
+    set_entry_auth_cookie,
+    should_skip_entry_auth,
+    verify_entry_password,
+)
 from .models import (
     PromptConfig,
     ProviderBackend,
@@ -29,6 +37,7 @@ from dotenv import load_dotenv, set_key
 
 app = FastAPI(title="AI Comic Gen API")
 logger = logging.getLogger(__name__)
+CONFIGURED_PLACEHOLDER = "__CONFIGURED__"
 
 # Setup logging to user directory
 setup_logging()
@@ -44,18 +53,37 @@ logger.info(f"STARTUP: OSS_ENDPOINT={os.getenv('OSS_ENDPOINT')}, OSS_BUCKET_NAME
 
 
 
+allowed_origins = [
+    origin.strip()
+    for origin in (
+        os.getenv("LUMENX_ALLOWED_ORIGINS")
+        or "http://localhost:3000,http://localhost:3001,http://127.0.0.1:3000,http://127.0.0.1:3001"
+    ).split(",")
+    if origin.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify the frontend origin
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["Content-Disposition"],  # Allow browsers to access Content-Disposition for downloads
 )
 
-# Middleware to add cache headers to static files
+# Middleware to enforce entry authentication and add cache headers to static files
 @app.middleware("http")
 async def add_cache_control_header(request: Request, call_next):
+    if is_entry_auth_enabled() and not should_skip_entry_auth(request):
+        if not is_request_authenticated(request):
+            return JSONResponse(
+                status_code=401,
+                content={
+                    "detail": "Authentication required",
+                    "auth_required": True,
+                },
+            )
+
     response = await call_next(request)
     if request.url.path.startswith("/files/"):
         response.headers["Cache-Control"] = "public, max-age=86400"
@@ -319,14 +347,14 @@ async def create_series(request: CreateSeriesRequest):
 @app.get("/series")
 async def list_series():
     """List all Series."""
-    series_list = pipeline.list_series()
+    series_list = pipeline.list_series_with_episode_assets()
     return signed_response(series_list)
 
 
 @app.get("/series/{series_id}")
 async def get_series(series_id: str):
     """Get Series details including assets and episode list."""
-    series = pipeline.get_series(series_id)
+    series = pipeline.get_series_with_episode_assets(series_id)
     if not series:
         raise HTTPException(status_code=404, detail="Series not found")
     # Include episode summaries
@@ -435,6 +463,7 @@ class UpdateModelSettingsRequest(BaseModel):
     t2i_model: Optional[str] = None
     i2i_model: Optional[str] = None
     i2v_model: Optional[str] = None
+    r2v_model: Optional[str] = None
     character_aspect_ratio: Optional[str] = None
     scene_aspect_ratio: Optional[str] = None
     prop_aspect_ratio: Optional[str] = None
@@ -476,7 +505,7 @@ async def update_series_model_settings(series_id: str, settings: UpdateModelSett
 @app.get("/series/{series_id}/assets")
 async def get_series_assets(series_id: str):
     """Get all shared assets from a Series."""
-    series = pipeline.get_series(series_id)
+    series = pipeline.get_series_with_episode_assets(series_id)
     if not series:
         raise HTTPException(status_code=404, detail="Series not found")
     return signed_response({
@@ -623,11 +652,14 @@ async def import_file_confirm(request: ConfirmImportRequest):
     try:
         # Prefer import_id from cache, fallback to request.text
         text = None
+        import_id_requested = bool(request.import_id)
         if request.import_id:
             text = pipeline._import_cache.pop(request.import_id, None)
         if not text:
             text = request.text
         if not text:
+            if import_id_requested:
+                raise ValueError("Import session expired or missing. Please re-upload the file, or provide text.")
             raise ValueError("No text available. Provide import_id or text.")
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
@@ -650,6 +682,8 @@ async def import_file_confirm(request: ConfirmImportRequest):
 
 class EnvConfig(ProviderRoutingConfig):
     DASHSCOPE_API_KEY: Optional[str] = None
+    LUMENX_ENTRY_PASSWORD: Optional[str] = None
+    LUMENX_ENTRY_PASSWORD_CONFIGURED: Optional[bool] = None
     LLM_PROVIDER: Optional[str] = None
     LLM_MODEL: Optional[str] = None
     OPENAI_API_KEY: Optional[str] = None
@@ -790,18 +824,34 @@ async def update_env_config(config: EnvConfig):
     """Updates environment configuration and saves to config file."""
     try:
         raw_config = config.dict(exclude_unset=True)
+        if not (raw_config.get("LUMENX_ENTRY_PASSWORD") or "").strip():
+            raw_config.pop("LUMENX_ENTRY_PASSWORD", None)
+        raw_config.pop("LUMENX_ENTRY_PASSWORD_CONFIGURED", None)
 
         # Extract endpoint_overrides and flatten into config_dict
         endpoint_overrides = raw_config.pop("endpoint_overrides", {})
 
         # Filter out None values and serialize enum values as plain strings.
         config_dict: Dict[str, str] = {}
+        protected_secret_keys = {
+            "DASHSCOPE_API_KEY",
+            "LUMENX_ENTRY_PASSWORD",
+            "OPENAI_API_KEY",
+            "ALIBABA_CLOUD_ACCESS_KEY_ID",
+            "ALIBABA_CLOUD_ACCESS_KEY_SECRET",
+            "KLING_ACCESS_KEY",
+            "KLING_SECRET_KEY",
+            "VIDU_API_KEY",
+            "SEEDANCE_API_KEY",
+        }
         for key, value in raw_config.items():
             if value is None:
                 continue
             if isinstance(value, ProviderBackend):
                 config_dict[key] = value.value
             else:
+                if key in protected_secret_keys and isinstance(value, str) and value.strip() == CONFIGURED_PLACEHOLDER:
+                    continue
                 config_dict[key] = value
 
         # Process endpoint overrides: validate keys against known providers
@@ -1035,14 +1085,17 @@ class AnalyzeToStoryboardRequest(BaseModel):
 
 
 @app.post("/projects/{script_id}/storyboard/analyze")
-async def analyze_to_storyboard(script_id: str, request: AnalyzeToStoryboardRequest):
+async def analyze_to_storyboard(script_id: str, request: AnalyzeToStoryboardRequest, background_tasks: BackgroundTasks):
     """
     Analyzes script text and generates storyboard frames using AI (Prompt B).
     Replaces existing frames with newly generated ones.
     """
     try:
-        updated_script = pipeline.analyze_text_to_frames(script_id, request.text)
-        return signed_response(updated_script)
+        script, task_id = pipeline.create_storyboard_analysis_task(script_id, request.text)
+        background_tasks.add_task(pipeline.process_storyboard_analysis_task, task_id)
+        response_data = script.model_dump() if hasattr(script, 'model_dump') else script.dict()
+        response_data["_task_id"] = task_id
+        return signed_response(response_data)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
@@ -1445,6 +1498,7 @@ async def update_model_settings(script_id: str, request: UpdateModelSettingsRequ
             request.t2i_model,
             request.i2i_model,
             request.i2v_model,
+            request.r2v_model,
             request.character_aspect_ratio,
             request.scene_aspect_ratio,
             request.prop_aspect_ratio,
@@ -2004,8 +2058,42 @@ async def polish_r2v_prompt(request: PolishR2VPromptRequest):
 
 # ===== Environment Configuration Endpoints =====
 
+class EntryAuthLoginRequest(BaseModel):
+    password: str = Field(..., min_length=1, max_length=4096)
+
+
+@app.get("/auth/status")
+@app.get("/config/auth/status")
+async def get_entry_auth_status(request: Request):
+    return {
+        "enabled": is_entry_auth_enabled(),
+        "authenticated": is_request_authenticated(request),
+    }
+
+
+@app.post("/auth/login")
+@app.post("/config/auth/login")
+async def entry_auth_login(request: Request, payload: EntryAuthLoginRequest):
+    if not is_entry_auth_enabled():
+        return {"status": "disabled"}
+
+    if not verify_entry_password(payload.password):
+        raise HTTPException(status_code=401, detail="Invalid password")
+
+    response = JSONResponse(content={"status": "ok"})
+    set_entry_auth_cookie(response, request)
+    return response
+
+
+@app.post("/auth/logout")
+@app.post("/config/auth/logout")
+async def entry_auth_logout(request: Request):
+    response = JSONResponse(content={"status": "ok"})
+    clear_entry_auth_cookie(response, request)
+    return response
+
 @app.get("/config/env")
-async def get_env_config():
+async def get_env_config(request: Request):
     """Get current environment configuration."""
     try:
         from ...utils.endpoints import PROVIDER_DEFAULTS
@@ -2016,25 +2104,34 @@ async def get_env_config():
             if value:
                 endpoint_overrides[env_key] = value
 
+        authenticated = is_request_authenticated(request)
+
+        def _secret_value(env_key: str) -> str:
+            raw = os.getenv(env_key, "")
+            return CONFIGURED_PLACEHOLDER if raw.strip() else ""
+
         return {
-            "DASHSCOPE_API_KEY": os.getenv("DASHSCOPE_API_KEY", ""),
+            "DASHSCOPE_API_KEY": _secret_value("DASHSCOPE_API_KEY"),
+            "LUMENX_ENTRY_PASSWORD": "",
+            "LUMENX_ENTRY_PASSWORD_CONFIGURED": is_entry_auth_enabled(),
             "LLM_PROVIDER": os.getenv("LLM_PROVIDER", "dashscope"),
             "LLM_MODEL": os.getenv("LLM_MODEL", ""),
-            "OPENAI_API_KEY": os.getenv("OPENAI_API_KEY", ""),
+            "OPENAI_API_KEY": _secret_value("OPENAI_API_KEY"),
             "OPENAI_BASE_URL": os.getenv("OPENAI_BASE_URL", ""),
-            "ALIBABA_CLOUD_ACCESS_KEY_ID": os.getenv("ALIBABA_CLOUD_ACCESS_KEY_ID", ""),
-            "ALIBABA_CLOUD_ACCESS_KEY_SECRET": os.getenv("ALIBABA_CLOUD_ACCESS_KEY_SECRET", ""),
+            "ALIBABA_CLOUD_ACCESS_KEY_ID": _secret_value("ALIBABA_CLOUD_ACCESS_KEY_ID"),
+            "ALIBABA_CLOUD_ACCESS_KEY_SECRET": _secret_value("ALIBABA_CLOUD_ACCESS_KEY_SECRET"),
             "OSS_BUCKET_NAME": os.getenv("OSS_BUCKET_NAME", ""),
             "OSS_ENDPOINT": os.getenv("OSS_ENDPOINT", ""),
             "OSS_BASE_PATH": os.getenv("OSS_BASE_PATH", ""),
-            "KLING_ACCESS_KEY": os.getenv("KLING_ACCESS_KEY", ""),
-            "KLING_SECRET_KEY": os.getenv("KLING_SECRET_KEY", ""),
-            "VIDU_API_KEY": os.getenv("VIDU_API_KEY", ""),
-            "SEEDANCE_API_KEY": os.getenv("SEEDANCE_API_KEY", ""),
+            "KLING_ACCESS_KEY": _secret_value("KLING_ACCESS_KEY"),
+            "KLING_SECRET_KEY": _secret_value("KLING_SECRET_KEY"),
+            "VIDU_API_KEY": _secret_value("VIDU_API_KEY"),
+            "SEEDANCE_API_KEY": _secret_value("SEEDANCE_API_KEY"),
             "KLING_PROVIDER_MODE": _normalize_provider_mode(os.getenv("KLING_PROVIDER_MODE")),
             "VIDU_PROVIDER_MODE": _normalize_provider_mode(os.getenv("VIDU_PROVIDER_MODE")),
             "PIXVERSE_PROVIDER_MODE": _normalize_provider_mode(os.getenv("PIXVERSE_PROVIDER_MODE")),
             "endpoint_overrides": endpoint_overrides,
+            "auth_required": is_entry_auth_enabled() and not authenticated,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { api } from '@/lib/api';
+import { api, API_URL } from '@/lib/api';
 
 export interface ImageVariant {
     id: string;
@@ -28,6 +28,7 @@ export interface VideoTask {
     model?: string;
     generation_mode?: string;  // 'i2v' or 'r2v'
     reference_video_urls?: string[];  // Reference videos for R2V
+    error?: string;
 }
 
 export interface Character {
@@ -133,6 +134,7 @@ export interface ModelSettings {
     t2i_model: string;  // Text-to-Image model for Assets
     i2i_model: string;  // Image-to-Image model for Storyboard
     i2v_model: string;  // Image-to-Video model for Motion
+    r2v_model: string;  // Reference-to-Video model for Motion
     character_aspect_ratio: string;  // Aspect ratio for Character generation
     scene_aspect_ratio: string;  // Aspect ratio for Scene generation
     prop_aspect_ratio: string;  // Aspect ratio for Prop generation
@@ -179,11 +181,17 @@ export interface I2VModelConfig {
     description: string;
     duration: DurationConfig;
     params: ModelParamSupport;
+    generationModes: Array<'i2v' | 'r2v'>;
 }
 
 const WAN26_PARAMS: ModelParamSupport = {
     resolution: { options: ['480p', '720p', '1080p'], default: '720p' },
     seed: true, negativePrompt: true, promptExtend: true, shotType: true, audio: true,
+};
+
+const WAN_R2V_PARAMS: ModelParamSupport = {
+    resolution: { options: ['480p', '720p', '1080p'], default: '720p' },
+    seed: true, shotType: true, audio: true,
 };
 
 const WAN25_PARAMS: ModelParamSupport = {
@@ -210,27 +218,34 @@ const VIDU_PARAMS: ModelParamSupport = {
 };
 
 export const I2V_MODELS: I2VModelConfig[] = [
-    { id: 'wan2.6-i2v', name: 'Wan 2.6 I2V / R2V', description: 'Latest model, supports R2V',
-      duration: { type: 'slider', min: 2, max: 15, step: 1, default: 5 }, params: WAN26_PARAMS },
+    { id: 'wan2.6-i2v', name: 'Wan 2.6 I2V', description: 'DashScope image-to-video model',
+      duration: { type: 'slider', min: 2, max: 15, step: 1, default: 5 }, params: WAN26_PARAMS, generationModes: ['i2v'] },
+    { id: 'wan2.6-r2v', name: 'Wan 2.6 R2V', description: 'DashScope reference-to-video model',
+      duration: { type: 'slider', min: 2, max: 15, step: 1, default: 5 }, params: WAN_R2V_PARAMS, generationModes: ['r2v'] },
+    { id: 'wan2.7-r2v', name: 'Wan 2.7 R2V', description: 'DashScope latest reference-to-video model',
+      duration: { type: 'slider', min: 2, max: 15, step: 1, default: 5 }, params: WAN_R2V_PARAMS, generationModes: ['r2v'] },
     { id: 'wan2.6-i2v-flash', name: 'Wan 2.6 I2V Flash', description: 'Fast generation',
-      duration: { type: 'slider', min: 2, max: 15, step: 1, default: 5 }, params: WAN26_PARAMS },
+      duration: { type: 'slider', min: 2, max: 15, step: 1, default: 5 }, params: WAN26_PARAMS, generationModes: ['i2v'] },
     { id: 'wan2.5-i2v-preview', name: 'Wan 2.5 I2V Preview', description: 'Default I2V',
-      duration: { type: 'buttons', options: [5, 10], default: 5 }, params: WAN25_PARAMS },
+      duration: { type: 'buttons', options: [5, 10], default: 5 }, params: WAN25_PARAMS, generationModes: ['i2v'] },
     { id: 'wan2.2-i2v-plus', name: 'Wan 2.2 I2V Plus', description: 'Higher quality',
-      duration: { type: 'fixed', value: 5 }, params: WAN22_PARAMS },
+      duration: { type: 'fixed', value: 5 }, params: WAN22_PARAMS, generationModes: ['i2v'] },
     { id: 'wan2.2-i2v-flash', name: 'Wan 2.2 I2V Flash', description: 'Faster generation',
-      duration: { type: 'fixed', value: 5 }, params: WAN22_PARAMS },
+      duration: { type: 'fixed', value: 5 }, params: WAN22_PARAMS, generationModes: ['i2v'] },
     { id: 'kling-v3', name: 'Kling v3', description: 'Kling AI latest model',
-      duration: { type: 'slider', min: 3, max: 15, step: 1, default: 5 }, params: KLING_PARAMS },
+      duration: { type: 'slider', min: 3, max: 15, step: 1, default: 5 }, params: KLING_PARAMS, generationModes: ['i2v'] },
     { id: 'viduq3-pro', name: 'Vidu Q3 Pro', description: 'Vidu latest model',
-      duration: { type: 'slider', min: 1, max: 16, step: 1, default: 5 }, params: VIDU_PARAMS },
+      duration: { type: 'slider', min: 1, max: 16, step: 1, default: 5 }, params: VIDU_PARAMS, generationModes: ['i2v'] },
     { id: 'viduq3-turbo', name: 'Vidu Q3 Turbo', description: 'Vidu fast generation',
-      duration: { type: 'slider', min: 1, max: 16, step: 1, default: 5 }, params: VIDU_PARAMS },
+      duration: { type: 'slider', min: 1, max: 16, step: 1, default: 5 }, params: VIDU_PARAMS, generationModes: ['i2v'] },
     { id: 'Doubao-Seedance-1.0-Pro-Fast', name: 'Seedance Pro Fast', description: 'ByteDance Seedance Pro Fast (via aiping)',
-      duration: { type: 'buttons', options: [5, 10], default: 5 }, params: { resolution: { options: ['480p', '720p', '1080p'], default: '720p' } } },
+      duration: { type: 'buttons', options: [5, 10], default: 5 }, params: { resolution: { options: ['480p', '720p', '1080p'], default: '720p' } }, generationModes: ['i2v'] },
     { id: 'Doubao-Seedance-1.0-Lite', name: 'Seedance Lite', description: 'ByteDance Seedance Lite (via aiping)',
-      duration: { type: 'buttons', options: [5, 10], default: 5 }, params: { resolution: { options: ['480p', '720p'], default: '720p' } } },
+      duration: { type: 'buttons', options: [5, 10], default: 5 }, params: { resolution: { options: ['480p', '720p'], default: '720p' } }, generationModes: ['i2v'] },
 ];
+
+export const getVideoModelsForMode = (mode: 'i2v' | 'r2v') =>
+    I2V_MODELS.filter((model) => model.generationModes.includes(mode));
 
 export const ASPECT_RATIOS = [
     { id: '9:16', name: '9:16', description: 'Portrait (576*1024)' },
@@ -436,9 +451,6 @@ export const useProjectStore = create<ProjectStore>()(
 
                 // Then fetch latest data from backend
                 try {
-                    const API_URL = typeof window !== 'undefined'
-                        ? (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000')
-                        : 'http://localhost:8000';
                     const response = await fetch(`${API_URL}/projects/${id}`);
                     if (response.ok) {
                         const rawData = await response.json();

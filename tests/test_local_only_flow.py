@@ -151,3 +151,30 @@ def test_local_only_pipeline_flow_without_oss(monkeypatch):
     assert script.characters[0].image_url == "uploads/local_only_uploaded.png"
     assert script.scenes[0].image_url == "assets/scenes/local_only_generated.png"
     assert script.frames[0].rendered_image_url == "storyboard/local_only_frame.png"
+
+
+def test_create_video_task_preserves_supported_r2v_model():
+    now = time.time()
+    script = Script(
+        id="script-r2v-model",
+        title="R2V Model",
+        original_text="demo",
+        characters=[],
+        scenes=[],
+        frames=[],
+        created_at=now,
+        updated_at=now,
+    )
+
+    pipeline = _build_pipeline(script, WanxModel({"params": {}}))
+
+    _, task_id = pipeline.create_video_task(
+        script_id=script.id,
+        image_url="",
+        prompt="Reference motion",
+        model="wan2.7-r2v",
+        generation_mode="r2v",
+    )
+    task = next(t for t in script.video_tasks if t.id == task_id)
+
+    assert task.model == "wan2.7-r2v"

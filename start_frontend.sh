@@ -2,6 +2,7 @@
 
 echo "========================================"
 echo "Starting Frontend (Next.js)..."
+echo "Port: ${FRONTEND_PORT:-3001}"
 echo "========================================"
 
 cd frontend
@@ -13,4 +14,4 @@ if [ ! -d "node_modules" ]; then
     echo "✅ Dependencies installed."
 fi
 
-npm run dev
+PORT="${FRONTEND_PORT:-3001}" npm run dev -- --hostname 127.0.0.1 --port "${FRONTEND_PORT:-3001}"

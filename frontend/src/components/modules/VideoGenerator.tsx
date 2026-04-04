@@ -16,6 +16,7 @@ export default function VideoGenerator() {
 
     // Get default model from project settings
     const defaultI2vModel = currentProject?.model_settings?.i2v_model || "wan2.5-i2v-preview";
+    const defaultR2vModel = currentProject?.model_settings?.r2v_model || "wan2.7-r2v";
 
     // Generation Params (Lifted State)
     const [params, setParams] = useState({
@@ -48,6 +49,12 @@ export default function VideoGenerator() {
             setParams(p => ({ ...p, model: currentProject.model_settings!.i2v_model }));
         }
     }, [currentProject?.model_settings?.i2v_model]);
+
+    useEffect(() => {
+        if (currentProject?.model_settings?.r2v_model && params.generationMode === "r2v") {
+            setParams(p => ({ ...p, model: currentProject.model_settings!.r2v_model }));
+        }
+    }, [currentProject?.model_settings?.r2v_model, params.generationMode]);
 
     // Sync tasks from project
     useEffect(() => {

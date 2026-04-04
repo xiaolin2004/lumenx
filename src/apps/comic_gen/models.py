@@ -100,6 +100,7 @@ class VideoTask(BaseModel):
     shot_type: str = Field("single", description="Shot type: 'single' or 'multi' (only for wan2.6-i2v)")
     generation_mode: str = Field("i2v", description="Generation mode: 'i2v' (image-to-video) or 'r2v' (reference-to-video)")
     reference_video_urls: List[str] = Field(default_factory=list, description="Reference video URLs for R2V generation (max 3)")
+    error: Optional[str] = Field(None, description="Failure detail when generation fails")
     # Kling params
     mode: Optional[str] = Field(None, description="Kling mode: std/pro")
     sound: Optional[str] = Field(None, description="Kling sound: on/off")
@@ -255,6 +256,7 @@ class ModelSettings(BaseModel):
     t2i_model: str = Field("wan2.6-t2i", description="Text-to-Image model for Assets")
     i2i_model: str = Field("wan2.6-image", description="Image-to-Image model for Storyboard")
     i2v_model: str = Field("wan2.6-i2v", description="Image-to-Video model for Motion")
+    r2v_model: str = Field("wan2.7-r2v", description="Reference-to-Video model for Motion")
     character_aspect_ratio: str = Field("9:16", description="Aspect ratio for Characters (9:16, 16:9, 1:1)")
     scene_aspect_ratio: str = Field("16:9", description="Aspect ratio for Scenes (9:16, 16:9, 1:1)")
     prop_aspect_ratio: str = Field("1:1", description="Aspect ratio for Props (9:16, 16:9, 1:1)")
